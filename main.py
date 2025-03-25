@@ -19,7 +19,7 @@ from pathlib import Path
 class TreasureGoblin:
     """
     TreasureGoblin is your personal finance companion, helping you track spending and build wealth through smarter money
-    habit. Monitor your finances today to create the financial future you deserve, whether that's next month of years
+    habits. Monitor your finances today to create the financial future you deserve, whether that's next month of years
     from now!
     """
 
@@ -38,10 +38,6 @@ class TreasureGoblin:
         self.media_dir.mkdir(exist_ok=True)
         # Initialize database
         self.setup_database()
-
-    def get_db_connection(self):
-        """Establish and return a database connection."""
-        return sqlite3.connect(self.db_path)
         
     def setup_database(self):
         """Create the database and tables if they don't exist."""
@@ -89,7 +85,11 @@ class TreasureGoblin:
         conn.commit()
         conn.close()
 
-    def add_transactions(self, transaction_type, amount, date, category, tag = None):
+    def get_db_connection(self):
+        """Establish and return a database connection."""
+        return sqlite3.connect(self.db_path)
+
+    def add_transaction(self, transaction_type, amount, date, category, tag = None):
         """
         Add a new transaction to the database.
 
@@ -172,16 +172,16 @@ class TreasureGoblin:
 
         query = """
             SELECT t.id, t.type, t.amount, t.date, c.name as category, t.tag
-            FROM transactions 2
-        JOIN categories c ON t.category_id = c.id" \
+            FROM transactions t
+        JOIN categories c ON t.category_id = c.id"
         """
 
         params = []
 
         # Add date filtering if specified
         if month and year:
-            query += " WHERE strftime('%m', t.date) = ? AND strftime('%Y'. t.date) = ?"
-            params.extended([f"{month:02d}", f"year"])
+            query += " WHERE strftime('%m', t.date) = ? AND strftime('%Y', t.date) = ?"
+            params.extend([f"{month:02d}", f"year"])
         elif month:
             query += " WHERE strftime('%m', t.date) = ?"
             params.append(f"{month:02d}")
@@ -208,3 +208,318 @@ class TreasureGoblin:
 
         conn.close()
         return transactions
+    
+class TreasureGoblinApp (QMainWindow):
+    """Main application window for TreasureGoblin"""
+    def __init__(self, treasuregoblin):
+        super().__init__()
+
+        self.memory_keeper = treasuregoblin
+        self.init_ui()
+
+    def init_ui(self):
+            """Initialize the user interface."""
+            self.setWindowTitle("TreasureGoblin - Your Income & Expense Tracker")
+            self.setGeometry(100, 100, 1000, 800)
+
+            # Create the central widget and main layout
+            central_widget = QWidget()
+            self.setCentralWidget(central_widget)
+            main_layout = QVBoxLayout(central_widget)
+
+            # Header with application title
+            header_label = QLabel("TreasureGoblin")
+            header_label.setFont(QFont("Arial", 18, QFont.Bold))
+            header_label.setAlignment(Qt.AlignCenter)
+            main_layout.addWidget(header_label)
+
+            # Create tab widget
+            self.tabs = QTabWidget()
+            main_layout.addWidget(self.tabs)
+
+            # Create individual tabs
+            self.dashboard_tab = self.create_dashboard_tab()
+            # self.create_transactions_tab = self.create_transactions_form_tab()
+            # self.categories_tab = self.create_categories_tab()
+            # self.reports_tab = self.create_reports_tab()
+
+            # Add tabs to the tab widget
+            self.tabs.addTab(self.dashboard_tab, "Dashboard")
+            # self.tabs.addTab(self.create_transactions_tab, "Transactions")
+            # self.tabs.addTab(self.categories_tab, "Categories")
+            # self.tabs.addTab(self.reports_tab, "Reports")
+
+            # Footer with status information
+            status_bar = self.statusBar()
+            status_bar.showMessage("Ready")
+
+    def get_db_connection(self):
+        """Establish and return a database connection."""
+        return sqlite3.connect(self.db_path)
+
+    def create_dashboard_tab(self):
+        """Create the dashboard tab with summary information."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Welcome section
+        welcome_group = QGroupBox("Welcome to TreasureGoblin!")
+        welcome_layout = QVBoxLayout(welcome_group)
+        welcome_text = QLabel(
+            "TreasureGoblin is your personal finance companion, helping you track spending and build wealth through smarter money"
+            " habits. Monitor your finances today to create the financial future you deserve, whether that's next month or years"
+            " from now!"
+        )
+        welcome_text.setWordWrap(True)
+        welcome_layout.addWidget(welcome_text)
+        layout.addWidget(welcome_group)
+        
+        # Financial Summary section
+        summary_group = QGroupBox("Financial Summary:")
+        summary_layout = QHBoxLayout(summary_group)
+        
+        # Total balance box
+        balance_box = QFrame()
+        balance_box.setFrameStyle(QFrame.StyledPanel)
+        balance_layout = QVBoxLayout(balance_box)
+        
+        balance_title = QLabel("Total balance across all accounts:")
+        balance_title.setAlignment(Qt.AlignCenter)
+        balance_layout.addWidget(balance_title)
+        
+        self.balance_amount = QLabel()
+        self.balance_amount.setAlignment(Qt.AlignCenter)
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(14)
+        self.balance_amount.setFont(font)
+        balance_layout.addWidget(self.balance_amount)
+        
+        summary_layout.addWidget(balance_box)
+        
+        # Month-to-date income and expenses box
+        mtd_box = QFrame()
+        mtd_box.setFrameStyle(QFrame.StyledPanel)
+        mtd_layout = QVBoxLayout(mtd_box)
+        
+        mtd_title = QLabel("Month-to-date income & expenses:")
+        mtd_title.setAlignment(Qt.AlignCenter)
+        mtd_layout.addWidget(mtd_title)
+        
+        self.month_income = QLabel()
+        self.month_income.setStyleSheet("color: green;")
+        self.month_income.setAlignment(Qt.AlignRight)
+        mtd_layout.addWidget(self.month_income)
+        
+        self.month_expenses = QLabel()
+        self.month_expenses.setStyleSheet("color: red;")
+        self.month_expenses.setAlignment(Qt.AlignRight)
+        mtd_layout.addWidget(self.month_expenses)
+        
+        self.month_net = QLabel()
+        self.month_net.setAlignment(Qt.AlignRight)
+        mtd_layout.addWidget(self.month_net)
+        
+        summary_layout.addWidget(mtd_box)
+        
+        # Month comparison box
+        comparison_box = QFrame()
+        comparison_box.setFrameStyle(QFrame.StyledPanel)
+        comparison_layout = QVBoxLayout(comparison_box)
+        
+        current_month = datetime.now().strftime("%B")
+        last_month = (datetime.now().replace(day=1) - timedelta(days=1)).strftime("%B")
+        
+        self.comparison_title = QLabel(f"{current_month} compared to {last_month}:")
+        self.comparison_title.setAlignment(Qt.AlignCenter)
+        comparison_layout.addWidget(self.comparison_title)
+        
+        self.prev_month_label = QLabel()
+        self.prev_month_label.setAlignment(Qt.AlignRight)
+        comparison_layout.addWidget(self.prev_month_label)
+        
+        self.curr_month_label = QLabel()
+        self.curr_month_label.setAlignment(Qt.AlignRight)
+        comparison_layout.addWidget(self.curr_month_label)
+        
+        self.difference_label = QLabel()
+        self.difference_label.setAlignment(Qt.AlignRight)
+        comparison_layout.addWidget(self.difference_label)
+        
+        summary_layout.addWidget(comparison_box)
+        
+        layout.addWidget(summary_group)
+        
+        # Recent Transactions section
+        recent_group = QGroupBox("Recent Transactions:")
+        recent_layout = QVBoxLayout(recent_group)
+        
+        self.transactions_list = QListWidget()
+        self.transactions_list.setMaximumHeight(200)
+        recent_layout.addWidget(self.transactions_list)
+        layout.addWidget(recent_group)
+        
+        # Nibble the goblin section
+        nibble_container = QHBoxLayout()
+        
+        # Left side - Nibble's tips
+        tips_frame = QFrame()
+        tips_frame.setFrameStyle(QFrame.StyledPanel)
+        tips_layout = QVBoxLayout(tips_frame)
+        
+        self.nibble_tips = QLabel(
+            "I'm Nibble, and I give helpful tips to users\n"
+            "about the app and finance facts! My tips\n"
+            "change along with my pose whenever the\n"
+            "Dashboard page is refreshed or I am clicked!\n"
+            "(not implemented here)"
+        )
+        tips_layout.addWidget(self.nibble_tips)
+        
+        # Right side - Nibble's image (placeholder)
+        nibble_image = QLabel()
+        nibble_image.setFixedSize(100, 100)
+        nibble_image.setStyleSheet("background-color: lightgreen; border-radius: 50px;")
+        
+        nibble_container.addWidget(tips_frame)
+        nibble_container.addWidget(nibble_image)
+        
+        layout.addLayout(nibble_container)
+        
+        # Update dashboard with data
+        self.update_dashboard()
+        
+        return tab
+    
+    def update_dashboard(self):
+        """Update dashboard with the latest data from the database."""
+        try:
+            # Get current and previous month info
+            now = datetime.now()
+            current_month = now.month
+            current_year = now.year
+
+            # Calculate previous month
+            if current_month == 1: # January
+                previous_month = 12
+                previous_year = current_year - 1
+            else:
+                previous_month = current_month - 1
+                previous_year = current_year
+
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            # Calculate total balance
+            cursor.execute("""
+                SELECT
+                    SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) -
+                    SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END)
+                FROM transactions
+            """)
+
+            total_balance = cursor.fetchone()[0] or 0
+            self.balance_amount.setText(f"$ {total_balance:.2f}")
+
+            # Calculate current month income and expenses
+            cursor.execute("""
+                SELECT
+                    SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as income,
+                    SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as expenses
+                FROM transactions
+                WHERE strftime('%m', date) = ? AND strftime('%Y', date) = ?
+            """, (f"{current_month:02d}", str(current_year)))
+
+            current_income, current_expenses = cursor.fetchone()
+            current_income = current_income or 0
+            current_expenses = current_expenses or 0
+            current_net = current_income - current_expenses
+
+            self.month_income.setText(f"$ {current_income:.2f}")
+            self.month_expenses.setText(f"$ {current_expenses:.2f}")
+            self.month_net.setText(f"$ {current_net:.2f}")
+
+            # Calculate the previous months income and expenses
+            cursor.execute("""
+                SELECT
+                    SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) -
+                    SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as net
+                FROM transactions
+                WHERE strftime('%m', date) = ? AND strftime('%Y', date) = ?
+            """, (f"{previous_month:02d}", str(previous_year)))
+
+            previous_net = cursor.fetchone()[0] or 0
+
+            # Update month comparison section
+            current_month_name = now.strftime("%B")
+            previous_month_name = datetime(previous_year, previous_month, 1).strftime("%B")
+
+            self.comparison_title.setText(f"{current_month_name} compared to {previous_month_name}:")
+            self.prev_month_label.setText(f"{previous_month_name}: $ {previous_net:.2f}")
+            self.curr_month_label.setText(f"{current_month_name}: $ {current_net:.2f}")
+
+            # Calculate difference and percentage
+            difference = current_net - previous_net
+            percentage = 0
+            if previous_net != 0:
+                percentage = (difference / abs(previous_net)) * 100
+
+            # Set color based on whether the difference is positive or negative
+            color = "green" if difference >= 0 else "red"
+            self.difference_label.setText(f"$ {difference:.2f} ({percentage:.2f}%)")
+            self.difference_label.setStyleSheet(f"color: {color};")
+
+            # Get recent transactions
+            cursor.execute("""
+                SELECT t.date, t.amount, t.type, c.name, t.tag
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                ORDER BY t.date DESC
+                LIMIT 5
+            """)
+
+            recent_transactions = cursor.fetchall()
+
+            # Clear and repopulate transactions list
+            self.transactions_list.clear()
+
+            for transaction in recent_transactions:
+                date, amount, type, category, tag = transaction
+                date_obj = datetime.fromisoformat(date).strftime("%m/%d/%y")
+
+                description = category
+                if tag:
+                    description += f" ({tag})"
+                
+                item_text =f"{date_obj} {description} $ "
+
+                if type == 'income':
+                    item_text += f"<span style = 'color: green;'>{amount:.2f}</span>"
+                else:
+                    item_text += f"<span style = 'color: red;'>{amount:.2f}</span>"
+
+                item = QListWidgetItem()
+                item.setText(item_text)
+                self.transactions_list.addItem(item)
+
+            conn.close()
+
+        except Exception as e:
+            print(f"Error updating dashboard: {e}")
+
+def main():
+    """Main entry point for the application."""
+    app = QApplication(sys.argv)
+
+    # Create the TreasureGoblin data manager
+    treasure_goblin = TreasureGoblin()
+
+    # Create and show the main application window
+    main_window = TreasureGoblinApp(treasure_goblin)
+    main_window.show()
+
+    # Run the application event loop
+    sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    main()
