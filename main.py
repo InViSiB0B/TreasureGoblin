@@ -150,7 +150,7 @@ class TreasureGoblin:
         
         except sqlite3.Error as e:
             conn.rollback()
-            print("Database error: {e}")
+            print(f"Database error: {e}")
             return None
         finally:
             conn.close()
@@ -173,7 +173,7 @@ class TreasureGoblin:
         query = """
             SELECT t.id, t.type, t.amount, t.date, c.name as category, t.tag
             FROM transactions t
-        JOIN categories c ON t.category_id = c.id"
+            JOIN categories c ON t.category_id = c.id
         """
 
         params = []
@@ -181,12 +181,12 @@ class TreasureGoblin:
         # Add date filtering if specified
         if month and year:
             query += " WHERE strftime('%m', t.date) = ? AND strftime('%Y', t.date) = ?"
-            params.extend([f"{month:02d}", f"year"])
+            params.extend([f"{month:02d}", f"{year}"])
         elif month:
             query += " WHERE strftime('%m', t.date) = ?"
             params.append(f"{month:02d}")
         elif year:
-            query += " WHERE strftime('%m', t.date) = ?"
+            query += " WHERE strftime('%Y', t.date) = ?"
             params.append(f"{year}")
 
         # Order by date descending (newest first)
@@ -194,7 +194,7 @@ class TreasureGoblin:
 
         # Add limit if specified
         if limit:
-            query += f"LIMIT {limit}"
+            query += f" LIMIT {limit}"
 
         cursor.execute(query, params)
 
@@ -214,7 +214,7 @@ class TreasureGoblinApp (QMainWindow):
     def __init__(self, treasuregoblin):
         super().__init__()
 
-        self.memory_keeper = treasuregoblin
+        self.treasure_goblin = treasuregoblin
         self.init_ui()
 
     def init_ui(self):
@@ -239,13 +239,13 @@ class TreasureGoblinApp (QMainWindow):
 
             # Create individual tabs
             self.dashboard_tab = self.create_dashboard_tab()
-            # self.create_transactions_tab = self.create_transactions_form_tab()
+            self.create_transactions_tab = self.create_transactions_tab()
             # self.categories_tab = self.create_categories_tab()
             # self.reports_tab = self.create_reports_tab()
 
             # Add tabs to the tab widget
             self.tabs.addTab(self.dashboard_tab, "Dashboard")
-            # self.tabs.addTab(self.create_transactions_tab, "Transactions")
+            self.tabs.addTab(self.create_transactions_tab, "Transactions")
             # self.tabs.addTab(self.categories_tab, "Categories")
             # self.tabs.addTab(self.reports_tab, "Reports")
 
@@ -254,8 +254,8 @@ class TreasureGoblinApp (QMainWindow):
             status_bar.showMessage("Ready")
 
     def get_db_connection(self):
-        """Establish and return a database connection."""
-        return sqlite3.connect(self.db_path)
+        """Relay database connection to the data manager."""
+        return self.treasure_goblin.get_db_connection()
 
     def create_dashboard_tab(self):
         """Create the dashboard tab with summary information."""
@@ -491,26 +491,318 @@ class TreasureGoblinApp (QMainWindow):
                 if tag:
                     description += f" ({tag})"
                 
-                item_text =f"{date_obj} {description} $ "
-
-                if type == 'income':
-                    item_text += f"<span style = 'color: green;'>{amount:.2f}</span>"
-                else:
-                    item_text += f"<span style = 'color: red;'>{amount:.2f}</span>"
-
+                 # Create item
                 item = QListWidgetItem()
-                item.setText(item_text)
                 self.transactions_list.addItem(item)
+                
+                # Create a label with rich text 
+                amount_color = "green" if type == 'income' else "red"
+                label = QLabel(f"{date_obj} {description} $ <span style='color:{amount_color}'>{amount:.2f}</span>")
+                label.setTextFormat(Qt.RichText)
+                
+                # Set the custom widget for the item
+                self.transactions_list.setItemWidget(item, label)
+                
+                # Set appropriate item size
+                item.setSizeHint(label.sizeHint())
 
             conn.close()
 
         except Exception as e:
             print(f"Error updating dashboard: {e}")
 
+    def create_transactions_tab(self):
+        """Create the transactions tab with transaction entry form and history."""
+        tab = QWidget()
+        layout = QHBoxLayout(tab)
+        
+        # Left side - Transactions list
+        transactions_list_container = QFrame()
+        transactions_list_container.setFrameStyle(QFrame.StyledPanel)
+        transactions_list_layout = QVBoxLayout(transactions_list_container)
+        
+        # Month selector
+        month_selector_layout = QHBoxLayout()
+        month_selector_layout.addWidget(QLabel("Transactions for:"))
+        
+        self.month_combo = QComboBox()
+        
+        # Add months (last 12 months)
+        current_date = QDate.currentDate()
+        for i in range(12):
+            # Calculate month and year
+            date = current_date.addMonths(-i)
+            month_year = date.toString("MMMM yyyy")
+            self.month_combo.addItem(month_year, (date.month(), date.year()))
+        
+        self.month_combo.currentIndexChanged.connect(self.load_transactions_for_month)
+        month_selector_layout.addWidget(self.month_combo)
+        
+        transactions_list_layout.addLayout(month_selector_layout)
+        
+        # Transactions list
+        self.transactions_list_widget = QListWidget()
+        self.transactions_list_widget.setMinimumWidth(300)
+        transactions_list_layout.addWidget(self.transactions_list_widget)
+        
+        # Right side - container for form and buttons
+        right_container = QVBoxLayout()
+        
+        # Transaction form
+        transaction_form = QFrame()
+        transaction_form.setFrameStyle(QFrame.StyledPanel)
+        form_layout = QVBoxLayout(transaction_form)
+        
+        form_title = QLabel("Enter a Transaction:")
+        form_title.setFont(QFont("Arial", 10, QFont.Bold))
+        form_layout.addWidget(form_title)
+        
+        # Form fields
+        transaction_form_fields = QFormLayout()
+        
+        # Transaction type
+        self.transaction_type_combo = QComboBox()
+        self.transaction_type_combo.addItems(["Expense", "Income"])
+        self.transaction_type_combo.currentTextChanged.connect(self.update_category_options)
+        transaction_form_fields.addRow("Transaction Type:", self.transaction_type_combo)
+        
+        # Transaction amount
+        amount_layout = QHBoxLayout()
+        amount_layout.addWidget(QLabel("$"))
+        self.amount_input = QLineEdit()
+        self.amount_input.setPlaceholderText("0.00")
+        amount_layout.addWidget(self.amount_input)
+        transaction_form_fields.addRow("Transaction Amount:", amount_layout)
+        
+        # Transaction date
+        self.date_input = QDateEdit()
+        self.date_input.setDisplayFormat("MM/dd/yy")
+        self.date_input.setDate(QDate.currentDate())
+        self.date_input.setCalendarPopup(True)
+        transaction_form_fields.addRow("Transaction Date:", self.date_input)
+        
+        # Transaction category
+        self.category_combo = QComboBox()
+        transaction_form_fields.addRow("Transaction Category:", self.category_combo)
+        
+        # Transaction tag
+        self.tag_input = QLineEdit()
+        self.tag_input.setPlaceholderText("Tag")
+        transaction_form_fields.addRow("Transaction Tag (Optional):", self.tag_input)
+        
+        form_layout.addLayout(transaction_form_fields)
+        
+        # Submit button
+        self.submit_button = QPushButton("Submit Transaction")
+        self.submit_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.submit_button.clicked.connect(self.submit_transaction)
+        form_layout.addWidget(self.submit_button, alignment=Qt.AlignCenter)
+        
+        right_container.addWidget(transaction_form)
+        
+        # Spacer
+        right_container.addStretch()
+        
+        # Import/Export buttons container
+        import_export_frame = QFrame()
+        import_export_frame.setFrameStyle(QFrame.StyledPanel)
+        import_export_layout = QHBoxLayout(import_export_frame)
+        
+        # Import button
+        import_button = QPushButton("Import Transactions")
+        import_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        import_button.clicked.connect(self.import_transactions)
+        import_export_layout.addWidget(import_button)
+        
+        # Export button
+        export_button = QPushButton("Export Transactions")
+        export_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        export_button.clicked.connect(self.export_transactions)
+        import_export_layout.addWidget(export_button)
+        
+        right_container.addWidget(import_export_frame)
+        
+        # Add left and right sides to main layout
+        layout.addWidget(transactions_list_container, 1)
+        layout.addLayout(right_container, 1)
+        
+        # Initialize the category options based on the default transaction type
+        self.update_category_options()
+        
+        # Load transactions for the current month
+        self.load_transactions_for_month()
+        
+        return tab
+    
+    def update_category_options(self):
+        """Update category dropdown based on selected transaction type."""
+        self.category_combo.clear()
+
+        # Get transaction type (conver to lowercase for database query)
+        transaction_type = self.transaction_type_combo.currentText().lower()
+
+        # Get categories from database
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT name FROM categories WHERE type = ? ORDER BY name",
+                (transaction_type,)
+            )
+
+            categories = [row[0] for row in cursor.fetchall()]
+            self.category_combo.addItems(categories)
+
+            conn.close()
+        except Exception as e:
+            print(f"Error loading categories: {e}")
+    
+    def load_transactions_for_month(self):
+        """Load transactions for the selected month and year."""
+        self.transactions_list_widget.clear()
+
+        # Get selected month and year
+        current_index = self.month_combo.currentIndex()
+        if current_index >= 0:
+            month, year = self.month_combo.itemData(current_index)
+        else:
+            # Default to current month/year
+            today = QDate.currentDate()
+            month, year = today.month(), today.year()
+
+        try:
+            # Get transactions for the selected month
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            query = """
+                SELECT t.id, t.date, t.amount, t.type, c.name as category, t.tag
+                FROM transactions t 
+                JOIN categories c ON t.category_id = c.id 
+                WHERE strftime('%m', t.date) = ? AND strftime('%Y', t.date) = ?
+                ORDER BY t.date DESC
+            """
+
+            cursor.execute(query, (f"{month:02d}", str(year)))
+
+            transactions = []
+            for row in cursor.fetchall():
+                id, date, amount, type, category, tag = row
+                transactions.append({
+                    'id': id,
+                    'date': date,
+                    'amount': amount,
+                    'type': type,
+                    'category': category,
+                    'tag': tag
+                })
+
+            conn.close()
+
+            # Add transactions to list widget
+            for transaction in transactions:
+                # Format date
+                date_obj = datetime.fromisoformat(transaction['date']).strftime("%m/%d/%y")
+
+                # Format category and tag
+                description = transaction['category']
+                if transaction['tag']:
+                    description += f" ({transaction['tag']})"
+
+                # Format amount with color based on type
+                amount_color = "green" if transaction['type'] == 'income' else "red"
+                amount_str = f"${transaction['amount']:.2f}"
+                
+                # Create a custom widget item
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, transaction['id'])  # Store transaction ID
+
+                # Create a label with rich text
+                label = QLabel(f"{date_obj} {description} <span style='color:{amount_color}'>{amount_str}</span>")
+                label.setTextFormat(Qt.RichText)
+                
+                # Add item to list and set custom widget
+                self.transactions_list_widget.addItem(item)
+                self.transactions_list_widget.setItemWidget(item, label)
+                
+                # Set appropriate item size
+                item.setSizeHint(label.sizeHint())
+            
+        except Exception as e:
+            print(f"Error loading transactions: {e}")
+
+    def submit_transaction(self):
+        """Handle the submission of a new transaction."""
+        try:
+            # Get form values
+            transaction_type = self.transaction_type_combo.currentText().lower()
+
+            # Validate amount
+            amount_text = self.amount_input.text().strip()
+            if not amount_text:
+                QMessageBox.warning(self, "Invalid Amount", "Please enter a transaction amount.")
+                return
+            
+            try:
+                amount = float(amount_text)
+                if amount <= 0:
+                    QMessageBox.warning(self, "Invalid Amount", "Amount must be greater than zero.")
+                    return
+            except ValueError:
+                QMessageBox.warning(self, "Invalid Amount", "Please enter a valid number for the amount.")
+                return
+            
+            # Get date in ISO format 
+            date = self.date_input.date().toString("MM-dd-yyyy")
+
+            # Get category
+            category = self.category_combo.currentText()
+            if not category:
+                QMessageBox.warning(self, "Missing Category", "Please select a transaction category.")
+                return
+            
+            # Get tag (optional)
+            tag_text = self.tag_input.text().strip()
+            tag = tag_text if tag_text else None
+
+            # Add transaction to database
+            transaction_id = self.treasure_goblin.add_transaction(
+                transaction_type, amount, date, category, tag
+            )
+
+            if transaction_id:
+                # Clear form
+                self.amount_input.clear()
+                self.tag_input.clear()
+                self.date_input.setDate(QDate.currentDate())
+
+                # Refresh the transactions list
+                self.load_transactions_for_month()
+
+                # Update the dashboard if needed
+                self.update_dashboard()
+
+                QMessageBox.information(self, "Success", "Transaction added successfully!")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to add transaction. Please try again.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
+
+    def import_transactions(self):
+        """Import transactions from zip."""
+        QMessageBox.information(self, "Not Implemented", "Import functionality is in the works.")
+
+    def export_transactions(self):
+        """Export transactions to zip."""
+        QMessageBox.information(self, "Not Implemented", "Export functionality is in the works.")
+
 def main():
     """Main entry point for the application."""
     app = QApplication(sys.argv)
 
+    app.setStyle("Fusion")
+    
     # Create the TreasureGoblin data manager
     treasure_goblin = TreasureGoblin()
 
