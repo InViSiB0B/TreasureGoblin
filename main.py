@@ -842,6 +842,64 @@ class TreasureGoblinApp (QMainWindow):
         else:
             QMessageBox.warning(self, "Export Failed", message)
 
+    def create_categories_tab(self):
+        """Create the categories tab for managing transaction categories."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Categories title
+        title_label = QLable("Transaction Categories:")
+        title_lable.setFont(QFont("Arial", 12, QFont.Bold))
+        layout.addWidget(title_label)
+
+        # Main content area
+        content_frame = QFrame()
+        content_frame.setFrameStyle(QFrame.StyledPanel)
+        content_layout = QVBoxLayout(content_frame)
+
+        # Category type selector (Income/Expenses)
+        type_selector_layout = QHBoxLayout()
+        type_selector_layout.addStretch()
+
+        self.expenses_button = QPushButton("Expenses")
+        self.expenses_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.expenses_button.setCheckable(True)
+        self.expenses_button.setChecked(True)
+        self.expenses_button.clicked.connect(lambda: self.switch_category_type('expense'))
+
+        self.income_button = QPushButton("Income")
+        self.income_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.income_button.setCheckable(True)
+        self.income_button.clicked.connect(lambda: self.switch_category_type('income'))
+
+        type_selector_layout.addWidget(self.expenses_button)
+        type_selector_layout.addWidget(self.income_button)
+        content_layout.addLayout(type_selector_layout)
+
+        # Categories grid
+        self.categories_grid = QGridLayout()
+        self.categories_grid.setSpacing(10)
+        content_layout.addLayout(self.categories_grid)
+
+        # Add button for new categories
+        add_button = QPushButton("+")
+        add_button.setFont(QFont("Arial", 16))
+        add_button.setMinimumSize(60, 60)
+        add_button.setStyleSheet("backgrond-color: #CD5C5C; color: white;")
+        add_button.clicked.connect(self.add_new_category)
+
+        # Add stretch to push everything to the top
+        content_layout.addStretch()
+
+        layout.addWidget(content_frame)
+
+        # Load initial categories (expenses by default)
+        self.current_category_type = 'expenses'
+        self.load_categories()
+
+        return tab
+
+
 class TreasureGoblinImportExport:
     """Helper class for handling import/export operations in TreasureGoblin."""
 
