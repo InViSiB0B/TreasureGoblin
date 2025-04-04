@@ -885,7 +885,7 @@ class TreasureGoblinApp (QMainWindow):
         add_button = QPushButton("+")
         add_button.setFont(QFont("Arial", 16))
         add_button.setMinimumSize(60, 60)
-        add_button.setStyleSheet("backgrond-color: #CD5C5C; color: white;")
+        add_button.setStyleSheet("background-color: #CD5C5C; color: white;")
         add_button.clicked.connect(self.add_new_category)
 
         # Add stretch to push everything to the top
@@ -894,7 +894,7 @@ class TreasureGoblinApp (QMainWindow):
         layout.addWidget(content_frame)
 
         # Load initial categories (expenses by default)
-        self.current_category_type = 'expenses'
+        self.current_category_type = 'expense'
         self.load_categories()
 
         return tab
@@ -904,11 +904,12 @@ class TreasureGoblinApp (QMainWindow):
         if category_type == 'expense':
             self.expenses_button.setChecked(True)
             self.income_button.setChecked(False)
+            self.current_category_type = 'expense'
         else:
             self.expenses_button.setChecked(False)
             self.income_button.setChecked(True)
+            self.current_category_type = 'income'
 
-        self.current_category_type = category_type
         self.load_categories()
 
     def load_categories(self):
@@ -925,8 +926,8 @@ class TreasureGoblinApp (QMainWindow):
             cursor = conn.cursor()
 
             cursor.execute(
-                    "SELECT id, name FROM categories WHERE type = ? ORDER BY name",
-                    (self.current_category_type)
+                    "SELECT id, name FROM categories WHERE type = ?",
+                    (self.current_category_type,)
             )
 
             categories = cursor.fetchall()
@@ -948,7 +949,7 @@ class TreasureGoblinApp (QMainWindow):
 
                 # Set up context menu for edit/delete
                 category_button.setContextMenuPolicy(Qt.CustomContextMenu)
-                category_button.CustomContextMenuRequested.connect(
+                category_button.customContextMenuRequested.connect(
                     lambda pos, cid=category_id, cname=category_name: self.show_category_context_menu(pos, cid, cname)
                 )
 
@@ -1036,7 +1037,7 @@ class TreasureGoblinApp (QMainWindow):
 
         if ok and new_name and new_name != current_name:
             try:
-                conn = self.get_db_connect()
+                conn = self.get_db_connection()
                 cursor = conn.cursor()
 
                 # Check if the new name already exists
@@ -1072,12 +1073,12 @@ class TreasureGoblinApp (QMainWindow):
         """Delete a category after confirmation."""
         # Check if category is in use
         try:
-            conn = self.get_db_connecttion()
+            conn = self.get_db_connection()
             cursor = conn.cursor()
 
             cursor.execute(
                 "SELECT COUNT(*) FROM transactions WHERE category_id = ?",
-                    (category_id)
+                    (category_id,)
             )
             
             usage_count = cursor.fetchone()[0]
