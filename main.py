@@ -11,7 +11,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QListWidget, QCalendarWidget, QFileDialog,
                              QFormLayout, QGroupBox, QSplitter, QTabWidget,
                              QMessageBox, QComboBox,QScrollArea, QFrame, QLineEdit, 
-                             QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout)
+                             QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
+                             QMenu)
 from PyQt5.QtCore import Qt, QDate, QDateTime
 from PyQt5.QtGui import QIcon, QFont
 from pathlib import Path
@@ -235,6 +236,10 @@ class TreasureGoblinApp (QMainWindow):
 
             # Create tab widget
             self.tabs = QTabWidget()
+
+            # Connect tab changed signal to categories when switching to Transactions tab
+            self.tabs.currentChanged.connect(lambda index: self.update_category_options() if index == 1 else None)
+
             main_layout.addWidget(self.tabs)
 
             # Create individual tabs
