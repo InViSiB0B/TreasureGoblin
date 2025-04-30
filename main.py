@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QListWidget, QCalendarWidget, QFileDialog,
                              QFormLayout, QGroupBox, QSplitter, QTabWidget,
                              QMessageBox, QComboBox,QScrollArea, QFrame, QLineEdit, 
-                             QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem)
+                             QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout)
 from PyQt5.QtCore import Qt, QDate, QDateTime
 from PyQt5.QtGui import QIcon, QFont
 from pathlib import Path
@@ -240,7 +240,7 @@ class TreasureGoblinApp (QMainWindow):
             # Create individual tabs
             self.dashboard_tab = self.create_dashboard_tab()
             self.create_transactions_tab = self.create_transactions_tab()
-            # self.categories_tab = self.create_categories_tab()
+            self.categories_tab = self.create_categories_tab()
             # self.reports_tab = self.create_reports_tab()
 
             # Add tabs to the tab widget
@@ -848,8 +848,8 @@ class TreasureGoblinApp (QMainWindow):
         layout = QVBoxLayout(tab)
 
         # Categories title
-        title_label = QLable("Transaction Categories:")
-        title_lable.setFont(QFont("Arial", 12, QFont.Bold))
+        title_label = QLabel("Transaction Categories:")
+        title_label.setFont(QFont("Arial", 12, QFont.Bold))
         layout.addWidget(title_label)
 
         # Main content area
