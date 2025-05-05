@@ -11,7 +11,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QListWidget, QCalendarWidget, QFileDialog,
                              QFormLayout, QGroupBox, QSplitter, QTabWidget,
                              QMessageBox, QComboBox,QScrollArea, QFrame, QLineEdit, 
-                             QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout)
+                             QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
+                             QMenu)
 from PyQt5.QtCore import Qt, QDate, QDateTime
 from PyQt5.QtGui import QIcon, QFont
 from pathlib import Path
@@ -235,6 +236,10 @@ class TreasureGoblinApp (QMainWindow):
 
             # Create tab widget
             self.tabs = QTabWidget()
+
+            # Connect tab changed signal to categories when switching to Transactions tab
+            self.tabs.currentChanged.connect(lambda index: self.update_category_options() if index == 1 else None)
+
             main_layout.addWidget(self.tabs)
 
             # Create individual tabs
@@ -246,7 +251,7 @@ class TreasureGoblinApp (QMainWindow):
             # Add tabs to the tab widget
             self.tabs.addTab(self.dashboard_tab, "Dashboard")
             self.tabs.addTab(self.create_transactions_tab, "Transactions")
-            # self.tabs.addTab(self.categories_tab, "Categories")
+            self.tabs.addTab(self.categories_tab, "Categories")
             # self.tabs.addTab(self.reports_tab, "Reports")
 
             # Footer with status information
@@ -885,7 +890,7 @@ class TreasureGoblinApp (QMainWindow):
         add_button = QPushButton("+")
         add_button.setFont(QFont("Arial", 16))
         add_button.setMinimumSize(60, 60)
-        add_button.setStyleSheet("backgrond-color: #CD5C5C; color: white;")
+        add_button.setStyleSheet("background-color: #CD5C5C; color: white;")
         add_button.clicked.connect(self.add_new_category)
 
         # Add stretch to push everything to the top
@@ -894,20 +899,242 @@ class TreasureGoblinApp (QMainWindow):
         layout.addWidget(content_frame)
 
         # Load initial categories (expenses by default)
-        self.current_category_type = 'expenses'
+        self.current_category_type = 'expense'
         self.load_categories()
 
         return tab
+    
+    def switch_category_type(self, category_type):
+        """Switch between income and expense categories."""
+        if category_type == 'expense':
+            self.expenses_button.setChecked(True)
+            self.income_button.setChecked(False)
+            self.current_category_type = 'expense'
+        else:
+            self.expenses_button.setChecked(False)
+            self.income_button.setChecked(True)
+            self.current_category_type = 'income'
 
+        self.load_categories()
 
+    def load_categories(self):
+        """Load categories of the current type from the database."""
+        # Clear existing categories
+        while self.categories_grid.count():
+            item = self.categories_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        try:
+            # Get categories from database
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                    "SELECT id, name FROM categories WHERE type = ?",
+                    (self.current_category_type,)
+            )
+
+            categories = cursor.fetchall()
+            conn.close()
+
+            # Add categories to grid
+            row, col = 0,0
+            max_cols = 4 # Number of columns in the grid
+
+            for category_id, category_name in categories:
+                category_button = QPushButton(category_name)
+                category_button.setMinimumSize(80, 60)
+
+                # Set different colors based on category type
+                if self.current_category_type == 'expense':
+                    category_button.setStyleSheet("background-color: #CC0000; color: white;")
+                else:
+                    category_button.setStyleSheet("background-color: #008800; color: white;")
+
+                # Set up context menu for edit/delete
+                category_button.setContextMenuPolicy(Qt.CustomContextMenu)
+                category_button.customContextMenuRequested.connect(
+                    lambda pos, cid=category_id, cname=category_name: self.show_category_context_menu(pos, cid, cname)
+                )
+
+                self.categories_grid.addWidget(category_button, row, col)
+
+                # Update grid positive
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+
+            # Add the "+" button at the end
+            add_button = QPushButton("+")
+            add_button.setFont(QFont("Arial", 16))
+            add_button.setMinimumSize(80, 60)
+            add_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+            add_button.clicked.connect(self.add_new_category)
+
+            self.categories_grid.addWidget(add_button, row if col == 0 else row, col)
+
+        except Exception as e:
+            print(f"Error loading categories: {e}")
+
+    def show_category_context_menu(self, pos, category_id, category_name):
+        """Show context menu for a category button."""
+        menu = QMenu()
+        edit_action = menu.addAction("Edit")
+        delete_action = menu.addAction("Delete")
+
+        # Get global position for the menu
+        global_pos = self.sender().mapToGlobal(pos)
+        action = menu.exec_(global_pos)
+
+        if action == edit_action:
+            self.edit_category(category_id, category_name)
+        elif action == delete_action:
+            self.delete_category(category_id, category_name)
+
+    def add_new_category(self):
+        """Add a new category."""
+        category_name, ok = QInputDialog.getText(
+            self, "Add Category", "Enter category name:"
+        )
+    
+        if ok and category_name:
+            try:
+                conn = self.get_db_connection()
+                cursor = conn.cursor()
+            
+                # Check if category already exists
+                cursor.execute(
+                    "SELECT id FROM categories WHERE name = ? AND type = ?",
+                    (category_name, self.current_category_type)
+                )
+            
+                if cursor.fetchone():
+                    QMessageBox.warning(
+                        self, "Duplicate Category", 
+                        f"A {self.current_category_type} category named '{category_name}' already exists."
+                )
+                else:
+                    # Add new category
+                    cursor.execute(
+                        "INSERT INTO categories (name, type) VALUES (?, ?)",
+                        (category_name, self.current_category_type)
+                    )
+                    conn.commit()
+                    QMessageBox.information(
+                        self, "Success", f"Category '{category_name}' added successfully!"
+                    )
+                    # Reload categories
+                    self.load_categories()
+            
+                conn.close()
+            
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to add category: {str(e)}")
+
+    def edit_category(self, category_id, current_name):
+        """Edit an existing category."""
+        new_name, ok = QInputDialog.getText(
+            self, "Edit Category", "Enter new category name:",
+            text=current_name
+        )
+
+        if ok and new_name and new_name != current_name:
+            try:
+                conn = self.get_db_connection()
+                cursor = conn.cursor()
+
+                # Check if the new name already exists
+                cursor.execute(
+                    "SELECT id FROM categories WHERE name =? AND type = ? AND id != ?",
+                        (new_name, self.current_category_type, category_id)
+                )
+
+                if cursor.fetchone():
+                    QMessageBox.warning(
+                        self, "Duplicate Category",
+                        f"A {self.current_category_type} category named '{new_name}' already exists"
+                    )
+                else:
+                    # Update category name
+                    cursor.execute(
+                        "UPDATE categories SET name = ? WHERE id = ?",
+                            (new_name, category_id)
+                    )
+                    conn.commit()
+                    QMessageBox.information(
+                        self, "Success", f"Category renamed to '{new_name}' successfully!"
+                    )
+                    # Reload categories
+                    self.load_categories()
+
+                conn.close()
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to update category: {str(e)}")
+
+    def delete_category(self, category_id, category_name):
+        """Delete a category after confirmation."""
+        # Check if category is in use
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM transactions WHERE category_id = ?",
+                    (category_id,)
+            )
+            
+            usage_count = cursor.fetchone()[0]
+
+            if usage_count > 0:
+                reply = QMessageBox.question(
+                    self, "Category In Use",
+                    f"The category '{category_name}' is used in {usage_count} transactions. "
+                    "Deleting it will affect those transactions. Proceed?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+
+                if reply != QMessageBox.Yes:
+                    conn.close()
+                    return
+            else:
+                reply = QMessageBox.question(
+                    self, "Confirm Deletion",
+                    f"Are you sure you want to delete the category '{category_name}'?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+
+                if reply != QMessageBox.Yes:
+                    conn.close()
+                    return
+
+            # Delete the category
+            cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+            conn.commit()
+
+            QMessageBox.information(
+                self, "Success", f"Category '{category_name}' deleted successfully!"
+            )
+
+            # Reload categories
+            self.load_categories()
+
+            conn.close()
+    
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to delete category: {str(e)}")
+
+            
 class TreasureGoblinImportExport:
     """Helper class for handling import/export operations in TreasureGoblin."""
-
+ 
     def __init__(self, treasure_goblin):
         """
         Initialize with a reference to the TreasureGoblin instance.
 
-        Args:
+        Args: 
             treasure_goblin: Reference to the TreasureGoblin instance
         """
         self.treasure_goblin = treasure_goblin
@@ -1202,6 +1429,7 @@ class TreasureGoblinImportExport:
             
             # Process each transaction
             for transaction in transactions:
+                transaction_dict = dict(transaction)
                 transaction_dict = dict(transaction)
                 
                 # Create tuple for duplicate checking
