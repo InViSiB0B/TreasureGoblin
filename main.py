@@ -6,6 +6,12 @@ import sys
 import tempfile
 import uuid
 import zipfile
+import matplotlib
+matplotlib.use('Qt5Agg')
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QTextEdit,
                              QListWidget, QCalendarWidget, QFileDialog,
@@ -246,13 +252,13 @@ class TreasureGoblinApp (QMainWindow):
             self.dashboard_tab = self.create_dashboard_tab()
             self.create_transactions_tab = self.create_transactions_tab()
             self.categories_tab = self.create_categories_tab()
-            # self.reports_tab = self.create_reports_tab()
+            self.reports_tab = self.create_reports_tab()
 
             # Add tabs to the tab widget
             self.tabs.addTab(self.dashboard_tab, "Dashboard")
             self.tabs.addTab(self.create_transactions_tab, "Transactions")
             self.tabs.addTab(self.categories_tab, "Categories")
-            # self.tabs.addTab(self.reports_tab, "Reports")
+            self.tabs.addTab(self.reports_tab, "Reports")
 
             # Footer with status information
             status_bar = self.statusBar()
@@ -1126,7 +1132,384 @@ class TreasureGoblinApp (QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to delete category: {str(e)}")
 
+
+    def get_db_connection(self):
+        """Get a connection to the SQLite database."""
+        try:
+            conn = sqlite3.connect(self.treasure_goblin.db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to connect to database: {str(e)}")
+            return None
+        
+
+    def create_reports_tab(self):
+        """Create the reports tab with visualizations of financial data."""
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+
+        # Main content area
+        content_frame = QFrame()
+        content_frame.setFrameStyle(QFrame.StyledPanel)
+        content_layout = QVBoxLayout(content_frame)
+
+        # Controls section
+        top_controls_layout = QHBoxLayout()
+
+        # Left side - Transaction type toggle (Expenses/Income)
+        type_toggle_layout = QHBoxLayout()
+        self.report_expenses_button = QPushButton("Expenses")
+        self.report_expenses_button.setCheckable(True)
+        self.report_expenses_button.setChecked(True)
+        self.report_expenses_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.report_expenses_button.clicked.connect(lambda: self.switch_report_type('expense'))
+
+        self.report_income_button = QPushButton("Income")
+        self.report_income_button.setCheckable(True)
+        self.report_income_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.report_income_button.clicked.connect(lambda: self.switch_report_type('income'))
+
+        type_toggle_layout.addWidget(self.report_expenses_button)
+        type_toggle_layout.addWidget(self.report_income_button)
+        top_controls_layout.addLayout(type_toggle_layout)
+
+        # Center - Current period display with nav buttons
+        period_navigation_layout = QHBoxLayout()
+
+        # Previous period button
+        self.prev_period_button = QPushButton("<")
+        self.prev_period_button.setFixedWidth(30)
+        self.prev_period_button.clicked.connect(self.go_to_prev_period)
+        period_navigation_layout.addWidget(self.prev_period_button)
+
+        # Current period label
+        self.report_period_label = QLabel()
+        self.report_period_label.setAlignment(Qt.AlignCenter)
+        self.report_period_label.setFont(QFont("Arial", 14, QFont.Bold))
+        period_navigation_layout.addWidget(self.report_period_label, 1)
+
+        # Next period button
+        self.next_period_button = QPushButton(">")
+        self.next_period_button.setFixedWidth(30)
+        self.next_period_button.clicked.connect(self.go_to_next_period)
+        period_navigation_layout.addWidget(self.next_period_button)
+
+        top_controls_layout.addLayout(period_navigation_layout)
+
+        # Right side - Time period toggle (Monthly/Yearly)
+        period_toggle_layout = QHBoxLayout()
+        self.report_monthly_button = QPushButton("Monthly")
+        self.report_monthly_button.setCheckable(True)
+        self.report_monthly_button.setChecked(True)
+        self.report_monthly_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.report_monthly_button.clicked.connect(lambda: self.switch_report_period('monthly'))
+
+        self.report_yearly_button = QPushButton("Yearly")
+        self.report_yearly_button.setCheckable(True)
+        self.report_yearly_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.report_yearly_button.clicked.connect(lambda: self.switch_report_period('yearly'))
+
+        period_toggle_layout.addWidget(self.report_monthly_button)
+        period_toggle_layout.addWidget(self.report_yearly_button)
+        top_controls_layout.addLayout(period_toggle_layout)
+
+        content_layout.addLayout(top_controls_layout)
+
+        # Chart area
+        self.chart_area = QLabel()
+        self.chart_area.setMinimumHeight(400)
+        self.chart_area.setStyleSheet("background-color: #E0E0E0;")
+        self.chart_layout = QVBoxLayout(self.chart_area)
+        content_layout.addWidget(self.chart_area)
+
+        # Bottom controls - Chart type toggle (Pie/Bar)
+        bottom_controls_layout = QHBoxLayout()
+        bottom_controls_layout.addStretch()
+
+        self.pie_chart_button = QPushButton("Pie")
+        self.pie_chart_button.setCheckable(True)
+        self.pie_chart_button.setChecked(True)
+        self.pie_chart_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.pie_chart_button.clicked.connect(lambda: self.switch_chart_type('pie'))
+
+        self.bar_chart_button = QPushButton("Bar")
+        self.bar_chart_button.setCheckable(True)
+        self.bar_chart_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        self.bar_chart_button.clicked.connect(lambda: self.switch_chart_type('bar'))
+
+        bottom_controls_layout.addWidget(self.pie_chart_button)
+        bottom_controls_layout.addWidget(self.bar_chart_button)
+
+        content_layout.addLayout(bottom_controls_layout)
+
+        main_layout.addWidget(content_frame)
+
+        # Initialize state
+        self.current_report_type = 'expense'
+        self.current_report_period = 'monthly'
+        self.current_chart_type = 'pie'
+
+        # Initialize current date for reports (use current date)
+        self.current_report_date = QDate.currentDate()
+        self.update_report_period_label()
+
+        # Load intial report
+        self.generate_report()
+
+        return tab
+    
+    def update_report_period_label(self):
+        """Update the period label based on current settings."""
+        if self.current_report_period == 'monthly':
+            self.report_period_label.setText(self.current_report_date.toString("MMMM yyyy"))
+        else: # yearly
+            self.report_period_label.setText(str(self.current_report_date.year()))
+
+    def go_to_prev_period(self):
+        """Go to the previous month or year."""
+        if self.current_report_period == 'monthly':
+            # Go to previous month
+            self.current_report_date = self.current_report_date.addMonths(-1)
+        else:
+            # Go to previous year
+            self.current_report_date = self.current_report_date.addYears(-1)
+
+        self.update_report_period_label()
+        self.generate_report()
+
+    def go_to_next_period(self):
+        """Go to the next month or year."""
+        if self.current_report_period == 'monthly':
+            # Go to next month
+            self.current_report_date = self.current_report_date.addMonths(1)
+        else:
+            # Go to next year
+            self.current_report_date = self.current_report_date.addYears(1)
+
+        self.update_report_period_label()
+        self.generate_report()
+
+    def switch_report_type(self, report_type):
+        """Switch between expense and income reports."""
+        if report_type == 'expense':
+            self.report_expenses_button.setChecked(True)
+            self.report_income_button.setChecked(False)
+        else:
+            self.report_expenses_button.setChecked(False)
+            self.report_income_button.setChecked(True)
+        
+        self.current_report_type = report_type
+        self.generate_report()
+
+    def switch_chart_type(self, chart_type):
+        """Switch between pie and bar charts."""
+        if chart_type == 'pie':
+            self.pie_chart_button.setChecked(True)
+            self.bar_chart_button.setChecked(False)
+        else:
+            self.pie_chart_button.setChecked(False)
+            self.bar_chart_button.setChecked(True)
+
+        self.current_chart_type = chart_type
+        self.generate_report()
+
+    def generate_report(self):
+        """Generate and display the report based on current settings."""
+        try:
+            # Get date range for query
+            start_date, end_date = self.get_report_date_range()
+
+            # Get data based on report type
+            data = self.get_report_data(start_date, end_date)
+
+            if not data:
+                self.display_no_data_message()
+                return
             
+            # Display chart based on chart type
+            if self.current_chart_type == 'pie':
+                self.display_pie_chart(data)
+            else:
+                self.display_bar_chart(data)
+        
+        except Exception as e:
+            print(f"Error generating report: {str(e)}")
+            self.display_error_message(str(e))
+
+    def get_report_date_range(self):
+        """Calculate the date range for the current report settings."""
+        if self.current_report_period == 'monthly':
+            # Start of month
+            start_date = QDate(self.current_report_date.year(),
+                               self.current_report_date.month(), 1)
+            
+            # End of month - calculate last day
+            if self.current_report_date.month() == 12:
+                end_date = QDate(self.current_report_date.year(), 12, 31)
+            else:
+                next_month = QDate(self.current_report_date.year(),
+                                   self.current_report_date.month() + 1, 1)
+                end_date = next_month.addDays(-1)
+        else:
+            # Start of year
+            start_date = QDate(self.current_report_date.year(), 1, 1)
+
+            # End of year
+            end_date = QDate(self.current_report_date.year(), 12, 31)
+
+        # Convert to strings for SQL query
+        start_date_str = start_date.toString("yyyy-MM-dd")
+        end_date_str = end_date.toString("yyy-MM-dd")
+
+        return start_date_str, end_date_str
+    
+    def get_report_data(self, start_date, end_date):
+        """Get data for the current report from the database."""
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+
+        query = """
+            SELECT
+                c.name as category,
+                SUM(t.amount) as total
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.type = ? AND t.date BETWEEN ? AND ?
+            GROUP BY c.name
+            ORDER BY total DESC
+        """
+
+        cursor.execute(query, (self.current_report_type, start_date, end_date))
+        data = cursor.fetchall()
+        conn.close()
+
+        return data
+    
+    def display_no_data_message(self):
+        """Display a message when no data is available."""
+        # Clear existing layout
+        self.clear_chart_area()
+
+        # Add no data message
+        message = QLabel("No transactions found for this period.")
+        message.setAlignment(Qt.AlignCenter)
+        message.setStyleSheet("font-size: 16px;")
+        self.chart_area.layout().addWidget(message)
+
+    def clear_chart_area(self):
+        """Clear all widgets from the chart area layout."""
+        if self.chart_layout is not None:
+            while self.chart_layout.count():
+                item = self.chart_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+    def display_error_message(self, error_message):
+        """Display an errror message in the chart area."""
+       # Clear existing layout
+        self.clear_chart_area()
+        
+        # Add error message
+        message = QLabel(f"Error loading report: {error_message}")
+        message.setAlignment(Qt.AlignCenter)
+        message.setStyleSheet("color: red; font-size: 14px;")
+        self.chart_layout.addWidget(message)
+
+    def display_pie_chart(self, data):
+        """Display a pie chart visualization"""
+        # Clear the existing chart area
+        self.clear_chart_area()
+        
+        if not data:
+            self.display_no_data_message()
+            return
+
+        # Extract categories and amounts
+        categories = [item[0] for item in data]
+        amounts = [item[1] for item in data]
+
+        # Create a figure and a set of subplots
+        figure = Figure(figsize=(6, 6), dpi=100)
+        canvas = FigureCanvas(figure)
+        ax = figure.add_subplot(111)
+
+        # Create the pie chart
+        wedges, texts, autotexts = ax.pie(
+            amounts, 
+            labels=categories,
+            autopct='%1.1f%%',
+            startangle=90,
+            shadow=False,
+            wedgeprops={'edgecolor': 'w', 'linewidth': 1},
+            textprops={'fontsize': 10, 'fontweight': 'bold'}
+        )
+
+        # Equal aspect ratio ensures that the pie is drawn as a circle
+        ax.axis('equal')
+
+        # Add title based on current report settings
+        period_text = self.report_period_label.text()
+        type_text = "Income" if self.current_report_type == 'income' else "Expenses"
+        ax.set_title(f"{type_text} Breakdown - {period_text}", fontsize=14, fontweight='bold')
+
+        # Set the background color of the figure to match the application
+        figure.patch.set_facecolor('#E0E0E0')
+
+        # Add the pie chart to the chart area
+        self.chart_layout.addWidget(canvas)
+
+    def display_bar_chart(self, data):
+        """Display a bar chart visualization"""
+        # Clear the existing chart area
+        self.clear_chart_area()
+
+        if not data:
+            self.display_no_data_message()
+            return
+        
+        # Extract categories and amounts
+        categories = [item[0] for item in data]
+        amounts = [item[1] for item in data]
+
+        # Create a figure and a set of subplots
+        figure = Figure(figsize=(8, 6), dpi=100)
+        canvas = FigureCanvas(figure)
+        ax = figure.add_subplot(111)
+
+        # Create a horizontal bar chart
+        bars = ax.barh(categories, amounts, color='#CD5C5C')
+
+        # Add data labels to the right of each bar
+        for bar in bars:
+            width = bar.get_width()
+            ax.text(width + 0.3, bar.get_y() + bar.get_height()/2,
+                    f'${width:.2f}', ha='left', va='center', fontweight='bold')
+            
+        # Remove the top and right spines
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        # Add gridlines
+        ax.grid(axis='x', linestyle='--', alpha=0.7)
+
+        # Add title based on current report settings
+        period_text = self.report_period_label.text()
+        type_text = "Income" if self.current_report_type == 'income' else "Expenses"
+        ax.set_title(f"{type_text} Breakdown - {period_text}", fontsize=14, fontweight='bold')
+
+        # Set the background color of the figure to match the application
+        figure.patch.set_facecolor('#E0E0E0')
+
+        # Set x-axis label
+        ax.set_xlabel('Amount ($)', fontweight='bold')
+
+        # Set up the chart layout
+        figure.tight_layout()
+
+        # Add the bar chart to the chart area
+        self.chart_layout.addWidget(canvas)
+       
 class TreasureGoblinImportExport:
     """Helper class for handling import/export operations in TreasureGoblin."""
  
