@@ -19,6 +19,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QMessageBox, QComboBox,QScrollArea, QFrame, QLineEdit, 
                              QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
                              QMenu)
+                             QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
+                             QMenu)
 from PyQt5.QtCore import Qt, QDate, QDateTime
 from PyQt5.QtGui import QIcon, QFont
 from pathlib import Path
@@ -242,6 +244,10 @@ class TreasureGoblinApp (QMainWindow):
 
             # Create tab widget
             self.tabs = QTabWidget()
+
+            # Connect tab changed signal to categories when switching to Transactions tab
+            self.tabs.currentChanged.connect(lambda index: self.update_category_options() if index == 1 else None)
+
 
             # Connect tab changed signal to categories when switching to Transactions tab
             self.tabs.currentChanged.connect(lambda index: self.update_category_options() if index == 1 else None)
@@ -861,6 +867,8 @@ class TreasureGoblinApp (QMainWindow):
         # Categories title
         title_label = QLabel("Transaction Categories:")
         title_label.setFont(QFont("Arial", 12, QFont.Bold))
+        title_label = QLabel("Transaction Categories:")
+        title_label.setFont(QFont("Arial", 12, QFont.Bold))
         layout.addWidget(title_label)
 
         # Main content area
@@ -897,6 +905,7 @@ class TreasureGoblinApp (QMainWindow):
         add_button.setFont(QFont("Arial", 16))
         add_button.setMinimumSize(60, 60)
         add_button.setStyleSheet("background-color: #CD5C5C; color: white;")
+        add_button.setStyleSheet("background-color: #CD5C5C; color: white;")
         add_button.clicked.connect(self.add_new_category)
 
         # Add stretch to push everything to the top
@@ -905,6 +914,7 @@ class TreasureGoblinApp (QMainWindow):
         layout.addWidget(content_frame)
 
         # Load initial categories (expenses by default)
+        self.current_category_type = 'expense'
         self.current_category_type = 'expense'
         self.load_categories()
 
@@ -1513,10 +1523,12 @@ class TreasureGoblinApp (QMainWindow):
 class TreasureGoblinImportExport:
     """Helper class for handling import/export operations in TreasureGoblin."""
  
+ 
     def __init__(self, treasure_goblin):
         """
         Initialize with a reference to the TreasureGoblin instance.
 
+        Args: 
         Args: 
             treasure_goblin: Reference to the TreasureGoblin instance
         """
@@ -1812,6 +1824,7 @@ class TreasureGoblinImportExport:
             
             # Process each transaction
             for transaction in transactions:
+                transaction_dict = dict(transaction)
                 transaction_dict = dict(transaction)
                 transaction_dict = dict(transaction)
                 
