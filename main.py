@@ -19,8 +19,6 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QMessageBox, QComboBox,QScrollArea, QFrame, QLineEdit, 
                              QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
                              QMenu)
-                             QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
-                             QMenu)
 from PyQt5.QtCore import Qt, QDate, QDateTime
 from PyQt5.QtGui import QIcon, QFont
 from pathlib import Path
@@ -1213,12 +1211,12 @@ class TreasureGoblinApp (QMainWindow):
         self.report_monthly_button.setCheckable(True)
         self.report_monthly_button.setChecked(True)
         self.report_monthly_button.setStyleSheet("background-color: #CD5C5C; color: white;")
-        self.report_monthly_button.clicked.connect(lambda: self.switch_report_period('monthly'))
+        self.report_monthly_button.clicked.connect(lambda: self.switch_report_type('monthly'))
 
         self.report_yearly_button = QPushButton("Yearly")
         self.report_yearly_button.setCheckable(True)
         self.report_yearly_button.setStyleSheet("background-color: #CD5C5C; color: white;")
-        self.report_yearly_button.clicked.connect(lambda: self.switch_report_period('yearly'))
+        self.report_yearly_button.clicked.connect(lambda: self.switch_report_type('yearly'))
 
         period_toggle_layout.addWidget(self.report_monthly_button)
         period_toggle_layout.addWidget(self.report_yearly_button)
@@ -1310,6 +1308,7 @@ class TreasureGoblinApp (QMainWindow):
             self.report_income_button.setChecked(True)
         
         self.current_report_type = report_type
+        self.update_report_period_label()
         self.generate_report()
 
     def switch_chart_type(self, chart_type):
@@ -1370,7 +1369,7 @@ class TreasureGoblinApp (QMainWindow):
 
         # Convert to strings for SQL query
         start_date_str = start_date.toString("yyyy-MM-dd")
-        end_date_str = end_date.toString("yyy-MM-dd")
+        end_date_str = end_date.toString("yyyy-MM-dd")
 
         return start_date_str, end_date_str
     
