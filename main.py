@@ -1211,12 +1211,12 @@ class TreasureGoblinApp (QMainWindow):
         self.report_monthly_button.setCheckable(True)
         self.report_monthly_button.setChecked(True)
         self.report_monthly_button.setStyleSheet("background-color: #CD5C5C; color: white;")
-        self.report_monthly_button.clicked.connect(lambda: self.switch_report_type('monthly'))
+        self.report_monthly_button.clicked.connect(lambda: self.switch_report_period('monthly'))
 
         self.report_yearly_button = QPushButton("Yearly")
         self.report_yearly_button.setCheckable(True)
         self.report_yearly_button.setStyleSheet("background-color: #CD5C5C; color: white;")
-        self.report_yearly_button.clicked.connect(lambda: self.switch_report_type('yearly'))
+        self.report_yearly_button.clicked.connect(lambda: self.switch_report_period('yearly'))
 
         period_toggle_layout.addWidget(self.report_monthly_button)
         period_toggle_layout.addWidget(self.report_yearly_button)
@@ -1311,6 +1311,19 @@ class TreasureGoblinApp (QMainWindow):
         self.update_report_period_label()
         self.generate_report()
 
+    def switch_report_period(self, period):
+        """Switch between monthly and yearly reports."""
+        if period == 'monthly':
+            self.report_monthly_button.setChecked(True)
+            self.report_yearly_button.setChecked(False)
+        else: # period == 'yearly'
+            self.report_monthly_button.setChecked(False)
+            self.report_yearly_button.setChecked(True)
+
+        self.current_report_period = period
+        self.update_report_period_label()
+        self.generate_report()
+
     def switch_chart_type(self, chart_type):
         """Switch between pie and bar charts."""
         if chart_type == 'pie':
@@ -1333,9 +1346,10 @@ class TreasureGoblinApp (QMainWindow):
             data = self.get_report_data(start_date, end_date)
 
             if not data:
+                print("No data found for this period")
                 self.display_no_data_message()
                 return
-            
+
             # Display chart based on chart type
             if self.current_chart_type == 'pie':
                 self.display_pie_chart(data)
@@ -1378,6 +1392,17 @@ class TreasureGoblinApp (QMainWindow):
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
+        check_query = """
+            SELECT COUNT(*) as count,
+                    MIN(date) as earliest_date,
+                    MAX(date) as latest_date
+            FROM transactions t
+            WHERE t.type = ? AND t.date BETWEEN ? AND ?
+        """
+
+        cursor.execute(check_query, (self.current_report_type, start_date, end_date))
+        check_result = cursor.fetchone()
+
         query = """
             SELECT
                 c.name as category,
@@ -1391,6 +1416,7 @@ class TreasureGoblinApp (QMainWindow):
 
         cursor.execute(query, (self.current_report_type, start_date, end_date))
         data = cursor.fetchall()
+
         conn.close()
 
         return data
