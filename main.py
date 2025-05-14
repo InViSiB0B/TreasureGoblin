@@ -6,6 +6,8 @@ import sys
 import tempfile
 import uuid
 import zipfile
+import random
+import os
 import matplotlib
 matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
@@ -20,7 +22,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
                              QMenu)
 from PyQt5.QtCore import Qt, QDate, QDateTime
-from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtGui import QIcon, QFont, QPixmap
 from pathlib import Path
 
 class TreasureGoblin:
@@ -222,7 +224,40 @@ class TreasureGoblinApp (QMainWindow):
         super().__init__()
 
         self.treasure_goblin = treasuregoblin
+        self.init_nibble_tips()
         self.init_ui()
+
+    def init_nibble_tips(self):
+        """Initialize Nibble's financial tips collection."""
+        self.nibble_tips_collection = [
+            "Save at least 20% of your income for long-term financial goals!",
+            "Track every expense to understand your spending habits better.",
+            "Use the 50/30/20 rule: 50% for needs, 30% for wants, 20% for savings.",
+            "Consider automating your savings to build wealth consistently.",
+            "Review your budget regularly to make adjustments as needed.",
+            "Check your credit report annually to maintain good financial health!",
+            "Pay off high-interest debt first to save money in the long run.",
+            "Set up an emergency fund that covers 3-6 months of expenses.",
+            "Avoid impulse purchases by waiting 24 hours before buying non-essentials.",
+            "Contribute to retirement accounts early to benefit from compound interest!",
+            "Look for ways to increase income, not just cut expenses.",
+            "Avoid using credit cards for purchases you can't pay off immediately.",
+            "Consider low-cost index funds for long-term investing.",
+            "Don't forget to budget for irregular expenses like car maintenance!",
+            "Shop around annually for better rates on insurance policies.",
+            "Eating out less frequently can significantly boost your savings!",
+            "Remember that small expenses add up over time - track them all!",
+            "Challenge yourself to a no-spend day once a week to build discipline.",
+            "Consider bundling services like internet and phone to save money.",
+            "Buying quality items that last longer can save money over time."
+        ]
+
+        # Initialize current tip index
+        self.current_tip_index = 0
+
+        # Default nibble image is the first one to be assigned
+        self.current_nibble_image = 0
+        
 
     def init_ui(self):
             """Initialize the user interface."""
@@ -243,12 +278,7 @@ class TreasureGoblinApp (QMainWindow):
             # Create tab widget
             self.tabs = QTabWidget()
 
-            # Connect tab changed signal to categories when switching to Transactions tab
-            self.tabs.currentChanged.connect(lambda index: self.update_category_options() if index == 1 else None)
-
-
-            # Connect tab changed signal to categories when switching to Transactions tab
-            self.tabs.currentChanged.connect(lambda index: self.update_category_options() if index == 1 else None)
+            self.tabs.currentChanged.connect(self.handle_tab_changed)
 
             main_layout.addWidget(self.tabs)
 
@@ -271,6 +301,16 @@ class TreasureGoblinApp (QMainWindow):
     def get_db_connection(self):
         """Relay database connection to the data manager."""
         return self.treasure_goblin.get_db_connection()
+    
+    def handle_tab_changed(self, index):
+        """Handle actions when tabs are changed."""
+        # When switching to transactions tab (index 1), update category options
+        if index == 1:
+            self.update_category_options()
+
+        # When swtiching to dahsboard tab (index 0), update dahsboard
+        elif index == 0:
+            self.update_dashboard()
 
     def create_dashboard_tab(self):
         """Create the dashboard tab with summary information."""
@@ -382,22 +422,25 @@ class TreasureGoblinApp (QMainWindow):
         tips_frame.setFrameStyle(QFrame.StyledPanel)
         tips_layout = QVBoxLayout(tips_frame)
         
-        self.nibble_tips = QLabel(
-            "I'm Nibble, and I give helpful tips to users\n"
-            "about the app and finance facts! My tips\n"
-            "change along with my pose whenever the\n"
-            "Dashboard page is refreshed or I am clicked!\n"
-            "(not implemented here)"
-        )
+        # Initialize Nibble's tip with a random tip from the collection
+        self.current_tip_index = random.randint(0, len(self.nibble_tips_collection) -1)
+        self.nibble_tips = QLabel(self.nibble_tips_collection[self.current_tip_index])
+        self.nibble_tips.setWordWrap(True)
+        self.nibble_tips.setMinimumWidth(300)
+        self.nibble_tips.setStyleSheet("font-size: 11pt;")
         tips_layout.addWidget(self.nibble_tips)
         
-        # Right side - Nibble's image (placeholder)
-        nibble_image = QLabel()
-        nibble_image.setFixedSize(100, 100)
-        nibble_image.setStyleSheet("background-color: lightgreen; border-radius: 50px;")
+        # Right side - Nibble's image
+        self.nibble_image_label = QLabel()
+        self.nibble_image_label.setFixedSize(120, 120)
+        self.nibble_image_label.setCursor(Qt.PointingHandCursor)
+        self.nibble_image_label.mousePressEvent = self.nibble_clicked
+
+        # Load Nibble's image
+        self.load_nibble_image()
         
         nibble_container.addWidget(tips_frame)
-        nibble_container.addWidget(nibble_image)
+        nibble_container.addWidget(self.nibble_image_label)
         
         layout.addLayout(nibble_container)
         
@@ -405,6 +448,77 @@ class TreasureGoblinApp (QMainWindow):
         self.update_dashboard()
         
         return tab
+    
+    def load_nibble_images(self):
+        """Load all available Nibble png images from the media directory."""
+        self.nibble_images = []
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        nibble_dir = os.path.join(script_dir, "nibble_images")
+
+        # Check if the directory exists
+        if os.path.exists(nibble_dir) and os.path.isdir(nibble_dir):
+            # Look for Nibble images in the directory
+            for file in os.listdir(nibble_dir):
+                if file.lower().endswith('.png'):
+                    self.nibble_images.append(os.path.join(nibble_dir, file))
+
+    def load_nibble_image(self):
+        """This is different than load_nibble_images, loads and displays an image (singular) from the images loaded"""
+        # Load images if not already loaded
+        if not hasattr(self, 'nibble_images'):
+            self.load_nibble_images()
+
+        # If we have actual images, use them
+        if self.nibble_images:
+            try:
+                image_path = self.nibble_images[self.current_nibble_image]
+                pixmap = QPixmap(image_path)
+
+                if not pixmap.isNull():
+                    # Scale the pixmap to fit our lavel while maintaining aspect ratio
+                    pixmap = pixmap.scaled(
+                        self.nibble_image_label.width(),
+                        self.nibble_image_label.height(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                    self.nibble_image_label.setPixmap(pixmap)
+                    return
+            except Exception as e:
+                print(f"Error loading Nibble image: {e}")
+
+        # Fallback to colored background if image loading fails
+        self.nibble_image_label.setPixmap(QPixmap()) # Clear any existing pixmap
+        self.nibble_image_label.setStyleSheet("background-color: lightgreen; border-radius: 60px;")
+
+    def update_nibble(self):
+        """Update Nibble with a random image and tip"""
+        # Select a random tip
+        new_tip_index = random.randint(0, len(self.nibble_tips_collection) - 1)
+
+        # Ensure the same tip can't be selected twice in a row
+        while new_tip_index == self.current_tip_index and len(self.nibble_tips_collection) > 1:
+            new_tip_index = random.randint(0, len(self.nibble_tips_collection) - 1)
+        
+        self.current_tip_index = new_tip_index
+        self.nibble_tips.setText(self.nibble_tips_collection[self.current_tip_index])
+
+        # Select a random image
+        if hasattr(self, 'nibble_images') and len(self.nibble_images) > 1:
+            new_image_index = random.randint(0, len(self.nibble_images) - 1)
+
+            # Ensure the same image isn't selected twice in a row
+            while new_image_index == self.current_nibble_image:
+                new_image_index = random.randint(0, len(self.nibble_images) - 1)
+
+            self.current_nibble_image = new_image_index
+
+        # Load the new image
+        self.load_nibble_image()
+
+    def nibble_clicked(self, event):
+        """Handle click events on Nibble's image."""
+        self.update_nibble()
     
     def update_dashboard(self):
         """Update dashboard with the latest data from the database."""
@@ -522,6 +636,9 @@ class TreasureGoblinApp (QMainWindow):
                 item.setSizeHint(label.sizeHint())
 
             conn.close()
+
+            # Update Nibble with a new tip and image
+            self.update_nibble()
 
         except Exception as e:
             print(f"Error updating dashboard: {e}")
