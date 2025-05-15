@@ -21,9 +21,16 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QMessageBox, QComboBox,QScrollArea, QFrame, QLineEdit, 
                              QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
                              QMenu)
-from PyQt5.QtCore import Qt, QDate, QDateTime
+from PyQt5.QtCore import Qt, QDate, QDateTime, QObject, pyqtSignal, QTimer
 from PyQt5.QtGui import QIcon, QFont, QPixmap
 from pathlib import Path
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import webbrowser
+import threading
 
 class TreasureGoblin:
     """
@@ -47,6 +54,9 @@ class TreasureGoblin:
         self.media_dir.mkdir(exist_ok=True)
         # Initialize database
         self.setup_database()
+
+        # Initialize Google Drive sync
+        self.drive_sync = GoogleDriveSync(self)
         
     def setup_database(self):
         """Create the database and tables if they don't exist."""
@@ -1697,6 +1707,10 @@ class TreasureGoblinImportExport:
             
             # Get database path
             db_path = self.treasure_goblin.db_path
+
+            # Create a timestamp for the backup file
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_filename = f"treasuregoblin_backup_{timestamp}.zip"
             
             # Create a temporary directory for the export
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -1709,7 +1723,7 @@ class TreasureGoblinImportExport:
                 # Create metadata file
                 metadata = {
                     "export_date": datetime.now().isoformat(),
-                    "app_version": "1.0",  # You can update this with actual version
+                    "app_version": "1.0",
                     "transaction_count": self._get_transaction_count()
                 }
                 
@@ -1721,6 +1735,9 @@ class TreasureGoblinImportExport:
                     # Add database and metadata files
                     zipf.write(db_dest, "treasuregoblin.db")
                     zipf.write(temp_path / "metadata.json", "metadata.json")
+
+            # Store the path for later reference
+            self.last_export_path = export_file
             
             return True, f"Successfully exported to {export_file}"
         
@@ -2036,6 +2053,156 @@ class TreasureGoblinImportExport:
             if import_conn:
                 import_conn.close()
     
+class GoogleDriveSync(QObject):
+    """Class for handling Google Drive synchronization of TreasureGoblin data."""
+
+    # Define signals, for UI updates
+    sync_started = pyqtSignal()
+    sync_completed = pyqtSignal(bool, str) # Success flag and message
+    sync_progress = pyqtSignal(int) # Progress percentage
+
+    # Scopes required for Google Drive API
+    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+
+    def __init__(self, treasure_goblin):
+        super().__init__()
+        self.treasure_goblin = treasure_goblin
+        self.app_dir = treasure_goblin.app_dir
+        self.config_file = self.app_dir / "drive_sync.json"
+
+        # Default configuration
+        self.config = {
+            'syn-enabled': False,
+            'sync_frequency': 'manual', # 'manual, 'app_close', 'daily', 'weekly'm 'monthly'
+            'last_sync': None,
+            'sync_folder_id': None, # Google Drive folder ID wher backups are stored
+            'sync_file_id': None, # Latest file ID on Google Drive
+            'token': None # OAuth token info
+        }
+
+        # Load existing configuration if available
+        self.load_config()
+
+    def load_config(self):
+        """Load Google Drive sync configuration from file."""
+        if self.config_file.exists():
+            try:
+                with open(self.config_file, 'r') as f:
+                    saved_config = json.load(f)
+                    
+                    # Update config with saved values
+                    self.config.update(saved_config)
+            except Exception as e:
+                print(f"Error loading Drive sync config: {e}")
+
+    def save_config(self):
+        """Save Google Drive sync configuration to file."""
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(self.config, f, indent = 2)
+        except Exception as e:
+            print(f"Error saving Drive sync config: {e}")
+
+    def get_credentials(self):
+        """Get and refresh Google Drive API credentials."""
+        creds = None
+
+        # Load token from config if available
+        if self.config['token']:
+            creds = Credentials.from_authorized_user_info(self.config['token'], self.SCOPES)
+
+        # If credentials are invalid or expired, refresh or authenticate
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                except Exception as e:
+                    print(f"Error refreshing credentials: {e}")
+                    return None
+            else:
+                # Need to authenticate with user
+                client_config_file = self.app_dir / "client_secret.json"
+
+                if not client_config_file.exists():
+                    raise FileNotFoundError(
+                        "Google Api client secret file not found. Please place your" \
+                        "client_secret.json in the application directory."
+                    )
+                
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    client_config_file, self.SCOPES)
+                creds = flow.run_local_server(port=0)
+            
+            # Save the updated token
+            self.config['token'] = json.loads(creds.to_json())
+            self.save_config()
+
+        return creds
+    
+    def get_drive_service(self):
+        """Create and return a Google Drive API service instance."""
+        creds = self.get_credentials()
+        if not creds:
+            return None
+        
+        return build ('drive', 'v3', credentials=creds)
+    
+    def ensure_backup_folder(self, service):
+        """Ensure the TreasureGoblin backup folder exists in Google Drive."""
+        folder_id = self.config['sync_folder_id']
+
+        # Check if there is already a folder ID and it exists
+        if folder_id:
+            try:
+                folder = service.files().get(fileId=folder_id).execute()
+                return folder_id
+            except Exception:
+                # Folder doesn't exist, need to create a new one
+                folder_id = None
+
+        # Create a new folder
+        folder_metadata = {
+            'name': 'TreasureGoblin Backups',
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+
+        folder = service.files().create(body=folder_metadata, fields='id').execute()
+        folder_id = folder.get('id')
+
+        # Save the folder ID
+        self.config['sync_folder_id'] = folder_id
+        self.save_config()
+
+        return folder_id
+    
+    def create_backup_file(self):
+        """Create a backup zip file of the database."""
+        try:
+            # Initialize the import/export helper if it doesn't exist already
+            if not hasattr(self, 'import_export'):
+                self.import_export = TreasureGoblinImportExport(self.treasure_goblin)
+
+            # Use the existing export_database method
+            success, message = self.import_export.export_database()
+
+            if success:
+                # export_database method shoul return the path to the exported file
+                # If it doesn't, parse it from the success message
+                if hasattr(self.import_export, 'last_export_path') and self.import_export.last_export_path:
+                    return self.import_export.last_export_path
+                
+                # If export_database doesn't store the path, extract it from the message
+                import re
+                match = re.search(r"Successfully exported to (.+)", message)
+                if match:
+                    return match.group(1)
+                
+            raise Exception(f"Failed to create backup: {message}")
+        
+        except Exception as e:
+            print (f"Error creating backup file: {e}")
+
+
 def main():
     """Main entry point for the application."""
     app = QApplication(sys.argv)
