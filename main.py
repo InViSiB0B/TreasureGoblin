@@ -18,9 +18,9 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QTextEdit,
                              QListWidget, QCalendarWidget, QFileDialog,
                              QFormLayout, QGroupBox, QSplitter, QTabWidget,
-                             QMessageBox, QComboBox,QScrollArea, QFrame, QLineEdit, 
+                             QMessageBox, QComboBox, QScrollArea, QFrame, QLineEdit, 
                              QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
-                             QMenu)
+                             QMenu, QFileDialog, QDialog)
 from PyQt5.QtCore import Qt, QDate, QDateTime, QObject, pyqtSignal, QTimer
 from PyQt5.QtGui import QIcon, QFont, QPixmap
 from pathlib import Path
@@ -2072,7 +2072,7 @@ class GoogleDriveSync(QObject):
 
         # Default configuration
         self.config = {
-            'syn-enabled': False,
+            'sync_enabled': False,
             'sync_frequency': 'manual', # 'manual, 'app_close', 'daily', 'weekly'm 'monthly'
             'last_sync': None,
             'sync_folder_id': None, # Google Drive folder ID wher backups are stored
@@ -2202,6 +2202,124 @@ class GoogleDriveSync(QObject):
         except Exception as e:
             print (f"Error creating backup file: {e}")
 
+    def upload_backup(self, backup_file_path):
+        """Upload the backup file to Google Drive."""
+        try:
+            service = self.get_drive_service()
+            if not service:
+                return False, "Failed to connect to Google Drive."
+            
+            # Ensure backup folder exists
+            folder_id = self.ensure_backup_folder(service)
+
+            # Prepare file metadata
+            file_metadata = {
+                'name': os.path.basename(backup_file_path),
+                'parents': [folder_id]
+            }
+
+            # Prepare the media upload
+            media = MediaFileUpload(
+                backup_file_path,
+                mimetype='application/zip',
+                resumable=True
+            )
+
+            # Upload file with progress tracking
+            request = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            )
+
+            response = None
+            progress = 0
+
+            while response is None:
+                status, response = request.next_chunk()
+                if status:
+                    progress = int(status.progress() * 100)
+                    self.sync_progress.emit(progress)
+
+            # Save the file ID
+            self.config['sync_file_id'] = response.get('id')
+            self.config['last_sync'] = datetime.datetime.now().isoformat()
+            self.save_config()
+
+            # Ensure 100% progress is shown
+            self.sync_progress.emit(100)
+
+            return True, "Backup successfully uploaded to Google Drive"
+        
+        except Exception as e:
+            print(f"Error uploading backup: {e}")
+            return False, f"Error uploading backup: {str(e)}"
+        
+    def sync_now(self):
+        """Perform an immediate sync to Google Drive."""
+        self.sync_started.emit()
+
+        try:
+            # Create backup file
+            backup_file_path = self.create_backup_file()
+
+            # Upload to Google Drive
+            success, message = self.upload_backup(backup_file_path)
+
+            # Emit completion signal
+            self.sync_completed.emit(success, message)
+
+            return success, message
+        
+        except Exception as e:
+            error_message = f"Sync failed: {str(e)}"
+            self.sync_completed.emit(False, error_message)
+            return False, error_message
+        
+    def should_sync_on_close(self):
+        """Check if backup should be synced on application close."""
+        if not self.config['sync_enabled']:
+            return False
+        
+        frequency = self.config['sync_frequency']
+
+        if frequency == 'app_close':
+            return True
+        
+        if frequency == 'daily':
+            # Check if last sync was more than a day ago
+            if not self.config['last_sync']:
+                return True
+            
+            last_sync = datetime.datetime.fromisoformat(self.config)['last_sync']
+            now = datetime.datetime.now()
+            return (now - last_sync).days >= 1
+        
+        if frequency == 'weekly':
+            # Check if last sync was more than a week ago
+            if not self.config['last_sync']:
+                return True
+            
+            last_sync = datetime.datetime.fromisoformat(self.config['last_sync'])
+            now = datetime.datetime.now()
+            return (now - last_sync).days >= 7
+        
+        if frequency == 'monthly':
+            # Check if last sync was more than a month ago
+            if not self.config['last_sync']:
+                return True
+            
+            last_sync = datetime.datetime.fromisoformat(self.config['last_sync'])
+            now = datetime.datetime.now()
+            return (now - last_sync).days >= 30
+        
+        return False
+    
+    def sync_on_close(self):
+        """Perform sync on application close if needed."""
+        if self.should_sync_on_close():
+            return self.sync_now()
+        return False, "Sync not needed based on current settings."
 
 def main():
     """Main entry point for the application."""
