@@ -20,8 +20,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QFormLayout, QGroupBox, QSplitter, QTabWidget,
                              QMessageBox, QComboBox, QScrollArea, QFrame, QLineEdit, 
                              QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
-                             QMenu, QFileDialog, QDialog)
-from PyQt5.QtCore import Qt, QDate, QDateTime, QObject, pyqtSignal, QTimer
+                             QMenu, QFileDialog, QDialog, QCheckBox, QProgressBar)
+from PyQt5.QtCore import Qt, QDate, QDateTime, QObject, pyqtSignal, QTimer, QThread
 from PyQt5.QtGui import QIcon, QFont, QPixmap
 from pathlib import Path
 from google.oauth2.credentials import Credentials
@@ -749,19 +749,54 @@ class TreasureGoblinApp (QMainWindow):
         import_export_frame = QFrame()
         import_export_frame.setFrameStyle(QFrame.StyledPanel)
         import_export_layout = QHBoxLayout(import_export_frame)
+
+        # Add title for import/export section
+        import_export_title = QLabel("Backup & Restore:")
+        import_export_title.setFont(QFont("Arial", 10, QFont.Bold))
+        import_export_layout.addWidget(import_export_title)
+
+        # Regular Import/Export buttons
+        local_backup_layout = QHBoxLayout()
         
         # Import button
         import_button = QPushButton("Import Transactions")
         import_button.setStyleSheet("background-color: #CD5C5C; color: white;")
         import_button.clicked.connect(self.import_transactions)
-        import_export_layout.addWidget(import_button)
+        local_backup_layout.addWidget(import_button)
         
         # Export button
         export_button = QPushButton("Export Transactions")
         export_button.setStyleSheet("background-color: #CD5C5C; color: white;")
         export_button.clicked.connect(self.export_transactions)
-        import_export_layout.addWidget(export_button)
+        local_backup_layout.addWidget(export_button)
+
+        import_export_layout.addLayout(local_backup_layout)
         
+        # Google Drive Sync section
+        drive_sync_layout = QHBoxLayout()
+
+        # Google Drive Sync button
+        self.drive_sync_button = QPushButton("Google Drive Sync")
+        self.drive_sync_button.setStyleSheet("background-color: #4285F4; color: white;")
+        self.drive_sync_button.clicked.connect(self.open_drive_sync_dialog)
+        drive_sync_layout.addWidget(self.drive_sync_button)
+
+        # Sync Now button
+        self.sync_now_button = QPushButton("Sync Now")
+        self.sync_now_button.setStyleSheet("background-color: #4285F4; color: white;")
+        self.sync_now_button.clicked.connect(self.sync_to_drive_now)
+        
+        # Enable/disable based on whether sync is configured
+        self.sync_now_button.setEnabled(self.treasure_goblin.drive_sync.config.get('token') is not None)
+        drive_sync_layout.addWidget(self.sync_now_button)
+
+        import_export_layout.addLayout(drive_sync_layout)
+
+        # Add sync status indicator
+        self.sync_status_label = QLabel()
+        self.update_sync_status_label()
+        import_export_layout.addWidget(self.sync_status_label)
+
         right_container.addWidget(import_export_frame)
         
         # Add left and right sides to main layout
@@ -983,6 +1018,134 @@ class TreasureGoblinApp (QMainWindow):
             QMessageBox.information(self, "Export Complete", message)
         else:
             QMessageBox.warning(self, "Export Failed", message)
+
+    def update_sync_status_label(self):
+        """Update the sync status label based on current sync configuration."""
+        drive_sync = self.treasure_goblin.drive_sync
+
+        if not drive_sync.config.get('token'):
+            self.sync_status_label.setText("Google Drive Sync: Not configured")
+            self.sync_status_label.setStyleSheet("color: gray;")
+            return
+        last_sync = drive_sync.config.get('last_sync')
+        if last_sync:
+            try:
+                sync_time = datetime.fromisoformat(last_sync)
+                last_sync_text = sync_time.strftime("%m/%d/%Y %H:%M")
+                self.sync_status_label.setText(f"Last synced: {last_sync_text}")
+                self.sync_status_label.setStyleSheet("color: green;")
+            except:
+                self.sync_status_label.setText("Last sync: Unknown")
+                self.sync_status_label.setStyleSheet("color: gray;")
+        else:
+            self.sync_status_label.setText("Google Drive Sync: Not yet synced")
+            self.sync_status_label.setStyleSheet("color: orange;")
+
+    def open_drive_sync_dialog(self):
+        """Open the Google Drive sync settings dialog."""
+        dialog = GoogleDriveSyncDialog(self, self.treasure_goblin.drive_sync)
+        result = dialog.exec_()
+
+        # Update UI elements after the dialog closes
+        self.sync_now_button.setEnabled(self.treasure_goblin.drive_sync.config.get('token') is not None)
+        self.update_sync_status_label()
+
+    def sync_to_drive_now(self):
+        """Perform an immediate sync to Google Drive."""
+        # Show progress dialog
+        progress_dialog = QDialog(self)
+        progress_dialog.setWindowTitle("Syncing to Google Drive")
+        progress_dialog.setFixedSize(300, 100)
+        
+        dialog_layout = QVBoxLayout(progress_dialog)
+        
+        status_label = QLabel("Syncing data to Google Drive...")
+        dialog_layout.addWidget(status_label)
+        
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, 100)
+        progress_bar.setValue(0)
+        dialog_layout.addWidget(progress_bar)
+        
+        # Connect signals
+        self._sync_progress_connection = self.treasure_goblin.drive_sync.sync_progress.connect(
+        lambda val: self._update_progress_safely(progress_bar, val)
+        )
+        self._sync_completed_connection = self.treasure_goblin.drive_sync.sync_completed.connect(
+            lambda success, message: self._handle_sync_completion_safely(success, message, progress_dialog)
+        )
+        
+        # Start sync in a separate thread
+        progress_dialog.show()
+        QApplication.processEvents()  # Ensure the dialog shows immediately
+        
+        # Create and start the thread
+        self.sync_thread = threading.Thread(
+            target=self.treasure_goblin.drive_sync.sync_now,
+            daemon=True
+        )
+        self.sync_thread.start()
+
+    def handle_sync_completed(self, success, message, dialog):
+        """Handle completion of Google Drive sync."""
+        dialog.close()
+        
+        if success:
+            QMessageBox.information(self, "Sync Complete", message)
+        else:
+            QMessageBox.warning(self, "Sync Failed", message)
+        
+        # Update the status label
+        self.update_sync_status_label()
+
+    def closeEvent(self, event):
+        """Handle application close event."""
+        # Check if we need to sync with Google Drive
+        if hasattr(self.treasure_goblin, 'drive_sync'):
+            if self.treasure_goblin.drive_sync.should_sync_on_close():
+                reply = QMessageBox.question(
+                    self, 
+                    "Sync to Google Drive", 
+                    "Sync your data to Google Drive before closing?",
+                    QMessageBox.Yes | QMessageBox.No, 
+                    QMessageBox.Yes
+                )
+                
+                if reply == QMessageBox.Yes:
+                    # Show a progress dialog
+                    progress_dialog = QDialog(self)
+                    progress_dialog.setWindowTitle("Syncing to Google Drive")
+                    progress_dialog.setFixedSize(300, 100)
+                    
+                    dialog_layout = QVBoxLayout(progress_dialog)
+                    
+                    status_label = QLabel("Syncing data to Google Drive before closing...")
+                    dialog_layout.addWidget(status_label)
+                    
+                    progress_bar = QProgressBar()
+                    progress_bar.setRange(0, 100)
+                    progress_bar.setValue(0)
+                    dialog_layout.addWidget(progress_bar)
+                    
+                    # Connect signals
+                    self.treasure_goblin.drive_sync.sync_progress.connect(progress_bar.setValue)
+                    self.treasure_goblin.drive_sync.sync_completed.connect(
+                        lambda success, message: progress_dialog.close()
+                    )
+                    
+                    # Start sync
+                    progress_dialog.show()
+                    QApplication.processEvents()
+                    
+                    # Direct sync (wait for it to complete)
+                    success, message = self.treasure_goblin.drive_sync.sync_now()
+                    progress_dialog.close()
+                    
+                    if not success:
+                        QMessageBox.warning(self, "Sync Failed", message)
+        
+        # Accept the close event
+        event.accept()
 
     def create_categories_tab(self):
         """Create the categories tab for managing transaction categories."""
@@ -1709,7 +1872,7 @@ class TreasureGoblinImportExport:
             db_path = self.treasure_goblin.db_path
 
             # Create a timestamp for the backup file
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_filename = f"treasuregoblin_backup_{timestamp}.zip"
             
             # Create a temporary directory for the export
@@ -2073,7 +2236,7 @@ class GoogleDriveSync(QObject):
         # Default configuration
         self.config = {
             'sync_enabled': False,
-            'sync_frequency': 'manual', # 'manual, 'app_close', 'daily', 'weekly'm 'monthly'
+            'sync_frequency': 'manual', # 'manual, 'app_close', 'daily', 'weekly', 'monthly'
             'last_sync': None,
             'sync_folder_id': None, # Google Drive folder ID wher backups are stored
             'sync_file_id': None, # Latest file ID on Google Drive
@@ -2120,19 +2283,51 @@ class GoogleDriveSync(QObject):
                     print(f"Error refreshing credentials: {e}")
                     return None
             else:
-                # Need to authenticate with user
-                client_config_file = self.app_dir / "client_secret.json"
-
-                if not client_config_file.exists():
-                    raise FileNotFoundError(
-                        "Google Api client secret file not found. Please place your" \
-                        "client_secret.json in the application directory."
+                # Look for client secret file with the full filename
+                try:
+                    # Define the path to the client secret file
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    client_config_file = os.path.join(
+                        script_dir, 
+                        "client_secret_201372032136-ev7nhopm297avo3lotgufftvlb6kgao2.apps.googleusercontent.com.json"
                     )
+                    
+                    # Check if the file exists
+                    if not os.path.exists(client_config_file):
+                        # Try in app_dir as fallback
+                        client_config_file = self.app_dir / "client_secret_201372032136-ev7nhopm297avo3lotgufftvlb6kgao2.apps.googleusercontent.com.json"
+                        
+                        # If still not found, try with a simpler name
+                        if not os.path.exists(client_config_file):
+                            client_config_file = self.app_dir / "client_secret.json"
+                            
+                            # If even simpler name not found, use embedded credentials
+                            if not os.path.exists(client_config_file):
+                                raise FileNotFoundError("Client secret file not found")
+                    
+                    # Use the file for authentication
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        client_config_file, self.SCOPES)
+                    creds = flow.run_local_server(port=0)
+                    
+                except FileNotFoundError:
+                    # Fallback to embedded credentials
+                    print("Using embedded credentials as fallback...")
+                    client_config = {
+                        "installed": {
+                            "client_id": self.CLIENT_ID,
+                            "client_secret": self.CLIENT_SECRET,
+                            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                            "token_uri": "https://oauth2.googleapis.com/token",
+                            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                            "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"]
+                        }
+                    }
+                    
+                    flow = InstalledAppFlow.from_client_config(
+                        client_config, self.SCOPES)
+                    creds = flow.run_local_server(port=0)
                 
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    client_config_file, self.SCOPES)
-                creds = flow.run_local_server(port=0)
-            
             # Save the updated token
             self.config['token'] = json.loads(creds.to_json())
             self.save_config()
@@ -2197,14 +2392,22 @@ class GoogleDriveSync(QObject):
                 if match:
                     return match.group(1)
                 
-            raise Exception(f"Failed to create backup: {message}")
+                # If we can't get the path from either source, raise a detailed error
+                raise Exception(f"Backup was created but couldn't determine file path. Message: {message}")
+            else:
+                raise Exception(f"Failed to create backup: {message}")
         
         except Exception as e:
             print (f"Error creating backup file: {e}")
+            return None # Return None instead of raising to handle it in upload_backup
 
     def upload_backup(self, backup_file_path):
         """Upload the backup file to Google Drive."""
         try:
+            # Check if backup_file is None or empty
+            if not backup_file_path:
+                return False, "No valid backup file was created. Check previous errors."
+            
             service = self.get_drive_service()
             if not service:
                 return False, "Failed to connect to Google Drive."
@@ -2243,7 +2446,7 @@ class GoogleDriveSync(QObject):
 
             # Save the file ID
             self.config['sync_file_id'] = response.get('id')
-            self.config['last_sync'] = datetime.datetime.now().isoformat()
+            self.config['last_sync'] = datetime.now().isoformat()
             self.save_config()
 
             # Ensure 100% progress is shown
@@ -2291,8 +2494,8 @@ class GoogleDriveSync(QObject):
             if not self.config['last_sync']:
                 return True
             
-            last_sync = datetime.datetime.fromisoformat(self.config)['last_sync']
-            now = datetime.datetime.now()
+            last_sync = datetime.fromisoformat(self.config)['last_sync']
+            now = datetime.now()
             return (now - last_sync).days >= 1
         
         if frequency == 'weekly':
@@ -2300,8 +2503,8 @@ class GoogleDriveSync(QObject):
             if not self.config['last_sync']:
                 return True
             
-            last_sync = datetime.datetime.fromisoformat(self.config['last_sync'])
-            now = datetime.datetime.now()
+            last_sync = datetime.fromisoformat(self.config['last_sync'])
+            now = datetime.now()
             return (now - last_sync).days >= 7
         
         if frequency == 'monthly':
@@ -2309,8 +2512,8 @@ class GoogleDriveSync(QObject):
             if not self.config['last_sync']:
                 return True
             
-            last_sync = datetime.datetime.fromisoformat(self.config['last_sync'])
-            now = datetime.datetime.now()
+            last_sync = datetime.fromisoformat(self.config['last_sync'])
+            now = datetime.now()
             return (now - last_sync).days >= 30
         
         return False
@@ -2320,6 +2523,222 @@ class GoogleDriveSync(QObject):
         if self.should_sync_on_close():
             return self.sync_now()
         return False, "Sync not needed based on current settings."
+    
+class GoogleDriveSyncDialog(QDialog):
+    """Dialog for configuring Google Drive synchronization settings."""
+
+    def __init__(self, parent, drive_sync):
+        super().__init__(parent)
+        self.drive_sync = drive_sync
+        self.init_ui()
+
+    def init_ui(self):
+        """Initialize the dialog UI."""
+        self.setWindowTitle("Google Drive Sync Settings")
+        self.setMinimumWidth(450)
+
+        layout = QVBoxLayout(self)
+
+        # Google Drive status section
+        status_group = QGroupBox("Google Drive Status")
+        status_layout = QVBoxLayout(status_group)
+
+        if self.drive_sync.config.get('token'):
+            status_label = QLabel("Connected to Google Drive")
+            status_label.setStyleSheet("color: green; font-weight: bold;")
+        else:
+            status_label = QLabel("Not connected to Google Drive")
+            status_label.setStyleSheet("color: gray;")
+
+        status_layout.addWidget(status_label)
+
+        # Google account info if available
+        if self.drive_sync.config.get('token'):
+            try:
+                # Try to extract email from token if available
+                token_info = self.drive_sync.config.get('token', {})
+                if isinstance(token_info, dict) and 'email' in token_info:
+                    email = token_info['email']
+                    account_label = QLabel(f"Connected Account: {email}")
+            except:
+                pass
+        
+        # Authentication button
+        auth_button_text = "Re-Connect" if self.drive_sync.config.get('token') else "Connect to Google Drive"
+        self.auth_button = QPushButton(auth_button_text)
+        self.auth_button.setStyleSheet("background-color: #4285F4; color: white;")
+        self.auth_button.clicked.connect(self.authenticate)
+        status_layout.addWidget(self.auth_button)
+
+        # Add info about Google Drive access
+        info_label = QLabel(
+            "Connecting to Google Drive allows TreasureGoblin to automatically back up " 
+            "your financial data. The app will only have access to the files it creates "
+            "in a folder named 'TreasureGoblin Backups'."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: gray; font-size: 9pt;")
+        status_layout.addWidget(self.auth_button)
+
+        layout.addWidget(status_group)
+
+        # Enable sync checkbox
+        self.enable_sync_checkbox = QCheckBox("Enable automatic Google Drive synchronization")
+        self.enable_sync_checkbox.setChecked(self.drive_sync.config.get('sync_enabled', False))
+        self.enable_sync_checkbox.setEnabled(self.drive_sync.config.get('token') is not None)
+        layout.addWidget(self.enable_sync_checkbox)
+
+        # Sync frequency options
+        sync_group = QGroupBox("Sync Frequency")
+        sync_layout = QFormLayout(sync_group)
+
+        self.frequency_combo = QComboBox()
+        self.frequency_combo.addItem("Manual Only", "manual")
+        self.frequency_combo.addItem("Every Time App Closes", "app_close")
+        self.frequency_combo.addItem("Once Daily", "daily")
+        self.frequency_combo.addItem("Once Weekly", "weekly")
+        self.frequency_combo.addItem("Once Monthly", "monthly")
+        self.frequency_combo.setEnabled(self.drive_sync.config.get('token') is not None)
+
+        # Set current value
+        current_frequency = self.drive_sync.config.get('sync_frequency', 'manual')
+        index = self.frequency_combo.findData(current_frequency)
+        if index >= 0:
+            self.frequency_combo.setCurrentIndex(index)
+
+        sync_layout.addRow("Backup Frequency:", self.frequency_combo)
+
+        # Last sync information
+        last_sync = self.drive_sync.config.get('last_sync')
+        last_sync_text = "Never" if not last_sync else datetime.fromisoformat(last_sync).strftime("%Y-%m-%d %H:%M:%S")
+        self.last_sync_label = QLabel(f"Last Sync: {last_sync_text}")
+        sync_layout.addRow("", self.last_sync_label)
+
+        layout.addWidget(sync_group)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+
+        self.sync_now_button = QPushButton("Sync Now")
+        self.sync_now_button.setStyleSheet("background-color: #4285F4; color: white;")
+        self.sync_now_button.clicked.connect(self.sync_now)
+        self.sync_now_button.setEnabled(self.drive_sync.config.get('token') is not None)
+
+        self.save_button = QPushButton("Save Settings")
+        self.save_button.clicked.connect(self.save_settings)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+
+        button_layout.addWidget(self.sync_now_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.cancel_button)
+
+        layout.addLayout(button_layout)
+
+        # Progress bar (hidden initially)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        # Connect signals
+        self.drive_sync.sync_started.connect(self.on_sync_started)
+        self.drive_sync.sync_completed.connect(self.on_sync_completed)
+        self.drive_sync.sync_progress.connect(self.on_sync_progress)
+
+    def authenticate(self):
+        """Handle Google Drive authentication."""
+        try:
+            # Clear existing token to force new authentication
+            self.drive_sync.config['token'] = None
+            self.drive_sync.save_config()
+
+            # Get new credentials (will launch browser auth)
+            creds = self.drive_sync.get_credentials()
+
+            if creds:
+                # Update the UI
+                self.setWindowTitle("Google Drive Sync Settings - Connecting...")
+                QApplication.processEvents() # Update the UI
+
+                # Test the credentials with a simple API call
+                service = self.drive_sync.get_drive_service()
+                if service:
+                    about = service.about().get(fields="user").execute()
+                    if "user" in about and "emailAddress" in about["user"]:
+                        email = about["user"]["emailAddress"]
+                        self.drive_sync.config['user_email'] = email
+                        self.drive_sync.save_config()
+
+                # Refresh the dialog
+                self.close()
+                new_dialog = GoogleDriveSyncDialog(self.parent(), self.drive_sync)
+                new_dialog.exec_()
+            else:
+                QMessageBox.warning(self, "Authentication Failed", "Failed to connect to Google Drive.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Authentication Error", f"Error during authentication: {str(e)}")
+
+    def sync_now(self):
+        """Handle manual sync."""
+        # Disable buttons during sync
+        self.sync_now_button.setEnabled(False)
+        self.save_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+
+        # Show progress bar
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+
+        # Run sync in a separate thread
+        threading.Thread(target=self.drive_sync.sync_now, daemon=True).start()
+
+    def on_sync_started(self):
+        """Handle sync started signal."""
+        # Already being handled from sync_now
+        pass
+
+    def on_sync_progress(self, progress):
+        """Handle sync progress signal."""
+        self.progress_bar.setValue(progress)
+
+    def on_sync_completed(self, success, message):
+        """Handle sync completed signal."""
+        # Re-enable buttons
+        self.sync_now_button.setEnabled(True)
+        self.save_button.setEnabled(True)
+        self.cancel_button.setEnabled(True)
+
+        # Hide the progress bar after a short delay
+        QTimer.singleShot(2000, lambda: self.progress_bar.setVisible(False))
+
+        # Update last sync time if successful
+        if success:
+            last_sync = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.last_sync_label.setText(f"Last Sync: {last_sync}")
+
+        # Show result message
+        if success:
+            QMessageBox.information(self, "Sync Complete", message)
+        else:
+            QMessageBox.warning(self, "Sync Failed", message)
+
+    def save_settings(self):
+        """Save settings and close dialog."""
+        # Update config
+        self.drive_sync.config['sync_enabled'] = self.enable_sync_checkbox.isChecked()
+        self.drive_sync.config['sync_frequency'] = self.frequency_combo.currentData()
+
+        # Save to file
+        self.drive_sync.save_config()
+
+        # Close dialog
+        self.accept()
+
 
 def main():
     """Main entry point for the application."""
