@@ -1068,11 +1068,9 @@ class TreasureGoblinApp (QMainWindow):
         dialog_layout.addWidget(progress_bar)
         
         # Connect signals
-        self._sync_progress_connection = self.treasure_goblin.drive_sync.sync_progress.connect(
-        lambda val: self._update_progress_safely(progress_bar, val)
-        )
-        self._sync_completed_connection = self.treasure_goblin.drive_sync.sync_completed.connect(
-            lambda success, message: self._handle_sync_completion_safely(success, message, progress_dialog)
+        self.treasure_goblin.drive_sync.sync_progress.connect(progress_bar.setValue)
+        self.treasure_goblin.drive_sync.sync_completed.connect(
+            lambda success, message: self.handle_sync_completed(success, message, progress_dialog)
         )
         
         # Start sync in a separate thread
@@ -1097,6 +1095,23 @@ class TreasureGoblinApp (QMainWindow):
         
         # Update the status label
         self.update_sync_status_label()
+
+    def _update_progress_safely(self, progress_bar, value):
+        """Update progress bar in a thread-safe way"""
+        # Use QMetaObject.invokeMethod or a simple check if we're on the main thread
+        if threading.current_thread() is threading.main_thread():
+            progress_bar.setValue(value)
+        else:
+            # Schedule the update on the main thread
+            QTimer.singleShot(0, lambda: progress_bar.setValue(value))
+
+    def _handle_sync_completion_safely(self, success, message, dialog):
+        """Handle sync completion in a thread-safe way"""
+        if threading.current_thread() is threading.main_thread():
+            self.handle_sync_completed(success, message, dialog)
+        else:
+            # Schedule the handling on the main thread
+            QTimer.singleShot(0, lambda: self.handle_sync_completed(success, message, dialog))
 
     def closeEvent(self, event):
         """Handle application close event."""
@@ -2371,35 +2386,50 @@ class GoogleDriveSync(QObject):
         return folder_id
     
     def create_backup_file(self):
-        """Create a backup zip file of the database."""
+        """Create a backup zip file of the database directly without user interaction."""
         try:
-            # Initialize the import/export helper if it doesn't exist already
-            if not hasattr(self, 'import_export'):
-                self.import_export = TreasureGoblinImportExport(self.treasure_goblin)
-
-            # Use the existing export_database method
-            success, message = self.import_export.export_database()
-
-            if success:
-                # export_database method shoul return the path to the exported file
-                # If it doesn't, parse it from the success message
-                if hasattr(self.import_export, 'last_export_path') and self.import_export.last_export_path:
-                    return self.import_export.last_export_path
+            # Get database path
+            db_path = self.treasure_goblin.db_path
+            
+            # Create a timestamp for the backup file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_filename = f"treasuregoblin_backup_{timestamp}.zip"
+            
+            # Create the backup in app's temp directory
+            temp_dir = self.app_dir / "temp"
+            temp_dir.mkdir(exist_ok=True)
+            
+            backup_file_path = temp_dir / backup_filename
+            
+            # Create a temporary directory for assembling the backup
+            with tempfile.TemporaryDirectory() as temp_assembly_dir:
+                temp_path = Path(temp_assembly_dir)
                 
-                # If export_database doesn't store the path, extract it from the message
-                import re
-                match = re.search(r"Successfully exported to (.+)", message)
-                if match:
-                    return match.group(1)
+                # Copy database file
+                db_dest = temp_path / "treasuregoblin.db"
+                shutil.copy2(db_path, db_dest)
                 
-                # If we can't get the path from either source, raise a detailed error
-                raise Exception(f"Backup was created but couldn't determine file path. Message: {message}")
-            else:
-                raise Exception(f"Failed to create backup: {message}")
+                # Create metadata file
+                metadata = {
+                    "export_date": datetime.now().isoformat(),
+                    "app_version": "1.0",
+                    "transaction_count": self._get_transaction_count()
+                }
+                
+                with open(temp_path / "metadata.json", "w") as f:
+                    json.dump(metadata, f, indent=2)
+                
+                # Create the zip file
+                with zipfile.ZipFile(backup_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # Add database and metadata files
+                    zipf.write(db_dest, "treasuregoblin.db")
+                    zipf.write(temp_path / "metadata.json", "metadata.json")
+                    
+            return str(backup_file_path)
         
         except Exception as e:
-            print (f"Error creating backup file: {e}")
-            return None # Return None instead of raising to handle it in upload_backup
+            print(f"Error creating direct backup file: {e}")
+            return None
 
     def upload_backup(self, backup_file_path):
         """Upload the backup file to Google Drive."""
@@ -2458,6 +2488,39 @@ class GoogleDriveSync(QObject):
             print(f"Error uploading backup: {e}")
             return False, f"Error uploading backup: {str(e)}"
         
+    def _get_transaction_count(self):
+        """
+        Get count of transactions in the database.
+        
+        Returns:
+            Dict containing transaction counts by type and total
+        """
+        try:
+            conn = self.treasure_goblin.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get total count
+            cursor.execute("SELECT COUNT(*) FROM transactions")
+            total = cursor.fetchone()[0]
+            
+            # Get income count
+            cursor.execute("SELECT COUNT(*) FROM transactions WHERE type = 'income'")
+            income = cursor.fetchone()[0]
+            
+            # Get expense count
+            cursor.execute("SELECT COUNT(*) FROM transactions WHERE type = 'expense'")
+            expense = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            return {
+                "total": total,
+                "income": income,
+                "expense": expense
+            }
+        except:
+            return {"total": 0, "income": 0, "expense": 0}
+        
     def sync_now(self):
         """Perform an immediate sync to Google Drive."""
         self.sync_started.emit()
@@ -2466,8 +2529,19 @@ class GoogleDriveSync(QObject):
             # Create backup file
             backup_file_path = self.create_backup_file()
 
+            if not backup_file_path:
+                self.sync_completed.emit(False, "Failed to create backup file")
+                return False, "Failed to create backup file"
+            
             # Upload to Google Drive
             success, message = self.upload_backup(backup_file_path)
+
+            # Clean up the temporary file after upload
+            try:
+                os.remove(backup_file_path)
+            except:
+                # Don't fail if cleanup fails
+                pass
 
             # Emit completion signal
             self.sync_completed.emit(success, message)
