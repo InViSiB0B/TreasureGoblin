@@ -669,35 +669,68 @@ class TreasureGoblinApp (QMainWindow):
         
         self.month_combo = QComboBox()
         
-        # Add months (last 12 months)
-        current_date = QDate.currentDate()
-        for i in range(12):
-            # Calculate month and year
-            date = current_date.addMonths(-i)
-            month_year = date.toString("MMMM yyyy")
-            self.month_combo.addItem(month_year, (date.month(), date.year()))
-        
-        self.month_combo.currentIndexChanged.connect(self.load_transactions_for_month)
         month_selector_layout.addWidget(self.month_combo)
+
+        # # Add months (last 12 months)
+        # current_date = QDate.currentDate()
+        # for i in range(12):
+        #     # Calculate month and year
+        #     date = current_date.addMonths(-i)
+        #     month_year = date.toString("MMMM yyyy")
+        #     self.month_combo.addItem(month_year, (date.month(), date.year()))
+        
+        # self.month_combo.currentIndexChanged.connect(self.load_transactions_for_month)
+        # month_selector_layout.addWidget(self.month_combo)
         
         transactions_list_layout.addLayout(month_selector_layout)
+
+        # Populate with months that have transaction data
+        self.populate_month_selector()
+
+        self.month_combo.currentIndexChanged.connect(self.load_transactions_for_month)
         
-        # Transactions list
+        # Transactions list with selection functionality
         self.transactions_list_widget = QListWidget()
         self.transactions_list_widget.setMinimumWidth(300)
+        self.transactions_list_widget.setSelectionMode(QListWidget.SingleSelection)
+        self.transactions_list_widget.setSelectionBehavior(QListWidget.SelectRows)
+        
+        # Connect selection change to update button states
+        self.transactions_list_widget.itemSelectionChanged.connect(self.on_transaction_selection_changed)
+        
         transactions_list_layout.addWidget(self.transactions_list_widget)
+
+        # Edit and Delete buttons at bottom of transaction list
+        transaction_buttons_layout = QHBoxLayout()
+
+        # Edit button - initially disabled
+        self.edit_transaction_button = QPushButton("Edit Transaction")
+        self.edit_transaction_button.setStyleSheet("background-color: #A0A0A0; color: white;")  # Gray when disabled
+        self.edit_transaction_button.setEnabled(False)
+        self.edit_transaction_button.clicked.connect(self.on_edit_transaction_clicked)
+        transaction_buttons_layout.addWidget(self.edit_transaction_button)
+
+        # Delete button - initially disabled
+        self.delete_transaction_button = QPushButton("Delete Transaction")
+        self.delete_transaction_button.setStyleSheet("background-color: #A0A0A0; color: white;")  # Gray when disabled
+        self.delete_transaction_button.setEnabled(False)
+        self.delete_transaction_button.clicked.connect(self.on_delete_transaction_clicked)
+        transaction_buttons_layout.addWidget(self.delete_transaction_button)
+
+        transactions_list_layout.addLayout(transaction_buttons_layout)
         
         # Right side - container for form and buttons
         right_container = QVBoxLayout()
         
-        # Transaction form
+        # Transaction form (used for both adding new transactions and editing existing transactions)
         transaction_form = QFrame()
         transaction_form.setFrameStyle(QFrame.StyledPanel)
         form_layout = QVBoxLayout(transaction_form)
         
-        form_title = QLabel("Enter a Transaction:")
-        form_title.setFont(QFont("Arial", 10, QFont.Bold))
-        form_layout.addWidget(form_title)
+        # Transaction form (changes based on add/edit mode)
+        self.form_title = QLabel("Enter a Transaction:")
+        self.form_title.setFont(QFont("Arial", 10, QFont.Bold))
+        form_layout.addWidget(self.form_title)
         
         # Form fields
         transaction_form_fields = QFormLayout()
@@ -733,13 +766,26 @@ class TreasureGoblinApp (QMainWindow):
         transaction_form_fields.addRow("Transaction Tag (Optional):", self.tag_input)
         
         form_layout.addLayout(transaction_form_fields)
+
+        # Buttons container
+        buttons_layout = QHBoxLayout()
         
-        # Submit button
+        # Submit button (text changes based on mode)
         self.submit_button = QPushButton("Submit Transaction")
         self.submit_button.setStyleSheet("background-color: #CD5C5C; color: white;")
         self.submit_button.clicked.connect(self.submit_transaction)
-        form_layout.addWidget(self.submit_button, alignment=Qt.AlignCenter)
+        buttons_layout.addWidget(self.submit_button)
         
+
+        # Cancel edit button (only shown during edit mode)
+        self.cancel_edit_button = QPushButton("Cancel Edit")
+        self.cancel_edit_button.setStyleSheet("background-color: #808080; color: white;")
+        self.cancel_edit_button.clicked.connect(self.cancel_edit)
+        self.cancel_edit_button.setVisible(False)
+        buttons_layout.addWidget(self.cancel_edit_button)
+
+        form_layout.addLayout(buttons_layout)
+
         right_container.addWidget(transaction_form)
         
         # Spacer
@@ -802,6 +848,9 @@ class TreasureGoblinApp (QMainWindow):
         # Add left and right sides to main layout
         layout.addWidget(transactions_list_container, 1)
         layout.addLayout(right_container, 1)
+
+        # Initialize edit mode tracking
+        self.editing_transaction_id = None
         
         # Initialize the category options based on the default transaction type
         self.update_category_options()
@@ -810,6 +859,51 @@ class TreasureGoblinApp (QMainWindow):
         self.load_transactions_for_month()
         
         return tab
+    
+    def populate_month_selector(self):
+        """Populate the month selector with only months that have transaction data."""
+        self.month_combo.clear()
+
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            # Get all unique year-month combination from transactions
+            query = """
+                SELECT DISTINCT
+                    strftime('%Y', date) as year,
+                    strftime('%m', date) as month,
+                    strftime('%Y-%m', date) as year_month
+                FROM transactions
+                ORDER BY year_month DESC    
+            """
+
+            cursor.execute(query)
+            results = cursor.fetchall()
+
+            # Add each month-year combination to the dropdown
+            for year, month, year_month in results:
+                # Conver to readable format
+                date_obj = datetime.strptime(f"{year}-{month}-01", "%Y-%m-%d")
+                display_text = date_obj.strftime("%B %Y")
+
+                # Add to combo box with month and year as data
+                self.month_combo.addItem(display_text, (int(month), int(year)))
+
+            conn.close()
+
+            # If no transactions exist, add current month as default
+            if self.month_combo.count() == 0:
+                current_date = QDate.currentDate()
+                current_month_text = current_date.toString("MMMM yyyy")
+                self.month_combo.addItem(current_month_text, (current_date.month(), current_date.year()))
+
+        except Exception as e:
+            print(f"Error populating the month selector: {e}")
+            # Fallback: add current month
+            current_date = QDate.currentDate()
+            current_month_text = current_date.toString("MMMM yyyy")
+            self.month_combo.addItem(current_month_text, (current_date.month(), current_date.year()))
     
     def update_category_options(self):
         """Update category dropdown based on selected transaction type."""
@@ -865,52 +959,208 @@ class TreasureGoblinApp (QMainWindow):
 
             transactions = []
             for row in cursor.fetchall():
-                id, date, amount, type, category, tag = row
-                transactions.append({
-                    'id': id,
-                    'date': date,
-                    'amount': amount,
-                    'type': type,
-                    'category': category,
-                    'tag': tag
-                })
+                 id, date, amount, type, category, tag = row
+                 transactions.append({
+                     'id': id,
+                     'date': date,
+                     'amount': amount,
+                     'type': type,
+                     'category': category,
+                     'tag': tag
+                 })
 
             conn.close()
 
-            # Add transactions to list widget
+             # Add transactions to list widget
             for transaction in transactions:
-                # Format date
-                date_obj = datetime.fromisoformat(transaction['date']).strftime("%m/%d/%y")
+                 # Format date
+                 date_obj = datetime.fromisoformat(transaction['date']).strftime("%m/%d/%y")
 
-                # Format category and tag
-                description = transaction['category']
-                if transaction['tag']:
-                    description += f" ({transaction['tag']})"
+                 # Format category and tag
+                 description = transaction['category']
+                 if transaction['tag']:
+                     description += f" ({transaction['tag']})"
 
-                # Format amount with color based on type
-                amount_color = "green" if transaction['type'] == 'income' else "red"
-                amount_str = f"${transaction['amount']:.2f}"
+                 # Format amount with color based on type
+                 amount_color = "green" if transaction['type'] == 'income' else "red"
+                 amount_str = f"${transaction['amount']:.2f}"
                 
-                # Create a custom widget item
-                item = QListWidgetItem()
-                item.setData(Qt.UserRole, transaction['id'])  # Store transaction ID
+                 # Create a custom widget item
+                 item = QListWidgetItem()
+                 item.setData(Qt.UserRole, transaction['id'])  # Store transaction ID
 
-                # Create a label with rich text
-                label = QLabel(f"{date_obj} {description} <span style='color:{amount_color}'>{amount_str}</span>")
-                label.setTextFormat(Qt.RichText)
+                 # Create a label with rich text
+                 label = QLabel(f"{date_obj} {description} <span style='color:{amount_color}'>{amount_str}</span>")
+                 label.setTextFormat(Qt.RichText)
                 
-                # Add item to list and set custom widget
-                self.transactions_list_widget.addItem(item)
-                self.transactions_list_widget.setItemWidget(item, label)
+                 # Add item to list and set custom widget
+                 self.transactions_list_widget.addItem(item)
+                 self.transactions_list_widget.setItemWidget(item, label)
                 
-                # Set appropriate item size
-                item.setSizeHint(label.sizeHint())
+                 # Set appropriate item size
+                 item.setSizeHint(label.sizeHint())
             
         except Exception as e:
             print(f"Error loading transactions: {e}")
 
+    def on_transaction_selection_changed(self):
+        """Handle when a transaction is selected or deselected in the list."""
+        # Get the currently selected item
+        selected_items = self.transactions_list.selectedItems()
+        current_item = self.transactions_list_widget.currentItem()
+
+        if current_item:
+            # A transaction is selected - enable the buttons and change their colod
+            self.edit_transaction_button.setEnabled(True)
+            self.edit_transaction_button.setStyleSheet("background-color: #4CAF50; color: white;")  # Green
+
+            self.delete_transaction_button.setEnabled(True)
+            self.delete_transaction_button.setStyleSheet("background-color: #f44336; color: white;")  # Red
+
+        else:
+            # No transactions selected - disable the buttons and make them gray
+            self.edit_transaction_button.setEnabled(False)
+            self.edit_transaction_button.setStyleSheet("background-color: #A0A0A0; color: white;")  # Gray
+
+            self.delete_transaction_button.setEnabled(False)
+            self.delete_transaction_button.setStyleSheet("background-color: #A0A0A0; color: white;")  # Gray
+
+    def on_edit_transaction_clicked(self):
+        """Handle clicking the Edit Transaction button."""
+        # Get the currently selected item
+        current_item = self.transactions_list_widget.currentItem()
+
+        if current_item:
+            # Get the transaction ID from the current item
+            transaction_id = current_item.data(Qt.UserRole)
+            if transaction_id:
+                self.edit_transaction(transaction_id)
+
+    def edit_transaction(self, transaction_id):
+        """Load transaction data into the form for editing"""
+        try:
+            # Get transaction details from database
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            query = """
+                SELECT t.type, t.amount, t.date, t.tag, c.name as category
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE t.id = ?
+            """
+
+            cursor.execute(query, (transaction_id,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                transaction_type, amount, date, tag, category = result
+
+                # Set form to edit mode
+                self.editing_transaction_id = transaction_id
+                self.form_title.setText("Edit Transaction:")
+                self.submit_button.setText("Save Transaction")
+                self.cancel_edit_button.setVisible(True)
+
+                # Populate form fields
+                # Set transaction type
+                type_text = "Income" if transaction_type == 'income' else "Expense"
+                self.transaction_type_combo.setCurrentText(type_text)
+
+                # Update categories based on type and set the current category
+                self.update_category_options()
+                self.category_combo.setCurrentText(category)
+
+                # Set amount
+                self.amount_input.setText(str(amount))
+
+                # Set date
+                date_obj = QDate.fromString(date, "MM-dd-yyyy")
+                self.date_input.setDate(date_obj)
+
+                # Set tag
+                self.tag_input.setText(tag if tag else "")
+
+                # Clear the selection and disable the edit/delete buttons
+                self.transactions_list_widget.clearSelection()
+
+            else:
+                QMessageBox.warning(self, "Error", "Transaction not found.")
+        
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load transactions: {str(e)}")
+
+    def on_delete_transaction_clicked(self):
+        """Handle clicking the Delete Transaction button."""
+        # Get the currently selected item
+        current_item = self.transactions_list_widget.currentItem()
+        
+        if current_item:
+            # Get the transaction ID from the current item
+            transaction_id = current_item.data(Qt.UserRole)
+            if transaction_id:
+                self.delete_transaction(transaction_id)
+    
+
+    def delete_transaction(self, transaction_id):
+        """Delete a transaction after confirmation."""
+        # Confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            "Are you sure you want to delete this transaction?\n\nThis action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            try:
+                # Delete from database
+                conn = self.get_db_connection()
+                cursor = conn.cursor()
+
+                cursor.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
+                conn.commit()
+                conn.close()
+
+                # Refresh the month selector (in case we deleted all transactions from a month)
+                self.populate_month_selector()
+
+                # Refresh the transactions list
+                self.load_transactions_for_month()
+
+                # Update dashboard
+                self.update_dashboard()
+
+                QMessageBox.information(self, "Success", "Transaction deleted succesfully!")
+            
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete transaction: {str(e)}")
+
+    def cancel_edit(self):
+        """Cancel editing mode and return to add mode."""
+        # Reset to add mode
+        self.editing_transaction_id = None
+        self.form_title.setText("Enter a Transaction:")
+        self.submit_button.setText("Submit Transaction")
+        self.cancel_edit_button.setVisible(False)
+
+        # Clear form fields
+        self.amount_input.clear()
+        self.tag_input.clear()
+        self.date_input.setDate(QDate.currentDate())
+        self.transaction_type_combo.setCurrentIndex(0)
+        self.update_category_options()
+
+        # Clear any selection in the transaction list
+        self.transactions_list_widget.setCurrentItem(None)
+        
+        # Manually trigger the selection changed handler to update button states
+        self.on_transaction_selection_changed()
+ 
     def submit_transaction(self):
-        """Handle the submission of a new transaction."""
+        """Handle the submission of a new or edited transaction."""
         try:
             # Get form values
             transaction_type = self.transaction_type_combo.currentText().lower()
@@ -943,28 +1193,104 @@ class TreasureGoblinApp (QMainWindow):
             tag_text = self.tag_input.text().strip()
             tag = tag_text if tag_text else None
 
-            # Add transaction to database
-            transaction_id = self.treasure_goblin.add_transaction(
-                transaction_type, amount, date, category, tag
-            )
+            if self.editing_transaction_id:
+                # Update exisiting transaction
+                success = self.update_transaction(
+                    self.editing_transaction_id, transaction_type, amount, date, category, tag
+                )
 
-            if transaction_id:
-                # Clear form
-                self.amount_input.clear()
-                self.tag_input.clear()
-                self.date_input.setDate(QDate.currentDate())
+                if success:
+                    # Reset form to add mode
+                    self.cancel_edit()
 
-                # Refresh the transactions list
-                self.load_transactions_for_month()
+                    # Refresh the month selector to include any new months
+                    self.populate_month_selector()
 
-                # Update the dashboard if needed
-                self.update_dashboard()
+                    # Refresh the transactions list
+                    self.load_transactions_for_month()
 
-                QMessageBox.information(self, "Success", "Transaction added successfully!")
+                    # Update the dashboard if needed
+                    self.update_dashboard()
+
+                    QMessageBox.information(self, "Success", "Transaction updated successfully!")
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to update transaction. Please try again.")
+
             else:
-                QMessageBox.warning(self, "Error", "Failed to add transaction. Please try again.")
+
+                # Add transaction to database
+                transaction_id = self.treasure_goblin.add_transaction(
+                    transaction_type, amount, date, category, tag
+                )
+
+                if transaction_id:
+                    # Clear form
+                    self.amount_input.clear()
+                    self.tag_input.clear()
+                    self.date_input.setDate(QDate.currentDate())
+
+                    # Refresh the transactions list
+                    self.load_transactions_for_month()
+
+                    # Update the dashboard if needed
+                    self.update_dashboard()
+
+                    QMessageBox.information(self, "Success", "Transaction added successfully!")
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to add transaction. Please try again.")
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
+
+    def update_transaction(self, transaction_id, transaction_type, amount, date, category, tag):
+        """Update an exisiting transaction in the database."""
+        try:
+            # Conver string date to proper format
+            if isinstance(date, str):
+                date_obj = datetime.strptime(date, '%m-%d-%Y').date()
+            else:
+                date_obj = date
+
+            # Make sure amount is positive
+            amount = abs(float(amount))
+
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            # Get category ID
+            cursor.execute(
+                "SELECT id FROM categories WHERE name = ? AND type = ?",
+                (category, transaction_type)
+            )
+            category_result = cursor.fetchone()
+
+            if not category_result:
+                # Category doesn't exist, create it
+                cursor.execute(
+                    "INSERT INTO categories (name, type) VALUES (?, ?)",
+                    (category, transaction_type)
+                )
+                category_id = cursor.lastrowid
+            else:
+                category_id = category_result[0]
+
+            # Update transaction
+            cursor.execute('''
+                UPDATE transactions
+                SET type = ?, amount = ?, date = ?, category_id = ?, tag = ?
+                WHERE id = ?
+            ''', (transaction_type, amount, date_obj.isoformat(), category_id, tag, transaction_id))
+
+            conn.commit()
+            conn.close()
+            return True
+        
+        except Exception as e:
+            print(f"Database error: {e}")
+            if conn:
+                conn.rollback()
+                conn.close()
+            return False
 
     def import_transactions(self):
         """Import transactions from zip."""
@@ -998,6 +1324,9 @@ class TreasureGoblinApp (QMainWindow):
         if success:
             QMessageBox.information(self, "Import Complete", message)
             
+            # Refresh the month selector to include any new months from import
+            self.populate_month_selector()
+
             # Refresh UI
             self.update_dashboard()
             self.load_transactions_for_month()
@@ -1031,7 +1360,7 @@ class TreasureGoblinApp (QMainWindow):
         if last_sync:
             try:
                 sync_time = datetime.fromisoformat(last_sync)
-                last_sync_text = sync_time.strftime("%m/%d/%Y %H:%M")
+                last_sync_text = sync_time.strftime("%m/%d/%Y %I:%M %p")
                 self.sync_status_label.setText(f"Last synced: {last_sync_text}")
                 self.sync_status_label.setStyleSheet("color: green;")
             except:
@@ -1056,6 +1385,7 @@ class TreasureGoblinApp (QMainWindow):
         progress_dialog = QDialog(self)
         progress_dialog.setWindowTitle("Syncing to Google Drive")
         progress_dialog.setFixedSize(300, 100)
+        progress_dialog.setModal(True)
         
         dialog_layout = QVBoxLayout(progress_dialog)
         
@@ -1065,29 +1395,42 @@ class TreasureGoblinApp (QMainWindow):
         progress_bar = QProgressBar()
         progress_bar.setRange(0, 100)
         progress_bar.setValue(0)
+        progress_bar.setTextVisible(True)
+        progress_bar.setFormat("%p%")
         dialog_layout.addWidget(progress_bar)
+
+        # Connect signals with proper thread safety
+        def update_progress(value):
+            progress_bar.setValue(value)
+            QApplication.processEvents()
         
-        # Connect signals
-        self.treasure_goblin.drive_sync.sync_progress.connect(progress_bar.setValue)
-        self.treasure_goblin.drive_sync.sync_completed.connect(
-            lambda success, message: self.handle_sync_completed(success, message, progress_dialog)
-        )
+        def handle_completion(success, message):
+            progress_dialog.accept()
+            self.handle_sync_completed(success, message, progress_dialog)
+    
+        # Connect the signals
+        self.treasure_goblin.drive_sync.sync_progress.connect(update_progress)
+        self.treasure_goblin.drive_sync.sync_completed.connect(handle_completion)
+            
+        # Connect the signals
+        self.treasure_goblin.drive_sync.sync_progress.connect(update_progress)
+        self.treasure_goblin.drive_sync.sync_completed.connect(handle_completion)
         
-        # Start sync in a separate thread
+        # Start sync in main thread (since we're handling threading properly with QApplication.processEvents)
         progress_dialog.show()
         QApplication.processEvents()  # Ensure the dialog shows immediately
         
-        # Create and start the thread
-        self.sync_thread = threading.Thread(
-            target=self.treasure_goblin.drive_sync.sync_now,
-            daemon=True
-        )
-        self.sync_thread.start()
+        # Run sync directly instead of in a separate thread
+        # The upload_backup method already handles progress properly
+        success, message = self.treasure_goblin.drive_sync.sync_now()
+        
+        # Disconnect signals to prevent memory leaks
+        self.treasure_goblin.drive_sync.sync_progress.disconnect(update_progress)
+        self.treasure_goblin.drive_sync.sync_completed.disconnect(handle_completion)
 
     def handle_sync_completed(self, success, message, dialog):
         """Handle completion of Google Drive sync."""
-        dialog.close()
-        
+
         if success:
             QMessageBox.information(self, "Sync Complete", message)
         else:
@@ -2451,11 +2794,18 @@ class GoogleDriveSync(QObject):
                 'parents': [folder_id]
             }
 
+            # Get file size for progress tracking
+            #file_size = os.path.getsize(backup_file_path)
+
+            # Start with 0% progress
+            self.sync_progress.emit(0)
+
             # Prepare the media upload
             media = MediaFileUpload(
                 backup_file_path,
                 mimetype='application/zip',
-                resumable=True
+                resumable=True,
+                chunksize=256*1024
             )
 
             # Upload file with progress tracking
@@ -2466,21 +2816,40 @@ class GoogleDriveSync(QObject):
             )
 
             response = None
-            progress = 0
+            last_progress = 0
 
+            # Update progress as chunks are uploaded
             while response is None:
-                status, response = request.next_chunk()
-                if status:
-                    progress = int(status.progress() * 100)
-                    self.sync_progress.emit(progress)
+                try:
+                    status, response = request.next_chunk()
+                    if status:
+                        # Calculate progress percentage
+                        current_progress = int(status.progress() * 100)
+                        
+                        # Only emit progress updates when the value changes
+                        if current_progress != last_progress:
+                            self.sync_progress.emit(current_progress)
+                            last_progress = current_progress
+
+                            # Process events to allow UI updates
+                            QApplication.processEvents()
+                
+                    # Small delay to allow UI updates
+                    import time
+                    time.sleep(0.01)
+                
+                except Exception as chunk_error:
+                    print(f"Error during chunk upload: {chunk_error}")
+                    raise chunk_error
 
             # Save the file ID
             self.config['sync_file_id'] = response.get('id')
             self.config['last_sync'] = datetime.now().isoformat()
             self.save_config()
 
-            # Ensure 100% progress is shown
+            # Ensure 100% progress is shown when done
             self.sync_progress.emit(100)
+            QApplication.processEvents()
 
             return True, "Backup successfully uploaded to Google Drive"
         
@@ -2523,9 +2892,9 @@ class GoogleDriveSync(QObject):
         
     def sync_now(self):
         """Perform an immediate sync to Google Drive."""
-        self.sync_started.emit()
-
         try:
+            self.sync_started.emit()
+
             # Create backup file
             backup_file_path = self.create_backup_file()
 
@@ -2684,7 +3053,7 @@ class GoogleDriveSyncDialog(QDialog):
 
         # Last sync information
         last_sync = self.drive_sync.config.get('last_sync')
-        last_sync_text = "Never" if not last_sync else datetime.fromisoformat(last_sync).strftime("%Y-%m-%d %H:%M:%S")
+        last_sync_text = "Never" if not last_sync else datetime.fromisoformat(last_sync).strftime("%m/%d/%Y %I:%M %p")
         self.last_sync_label = QLabel(f"Last Sync: {last_sync_text}")
         sync_layout.addRow("", self.last_sync_label)
 
@@ -2766,10 +3135,24 @@ class GoogleDriveSyncDialog(QDialog):
 
         # Show progress bar
         self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
         self.progress_bar.setVisible(True)
 
-        # Run sync in a separate thread
-        threading.Thread(target=self.drive_sync.sync_now, daemon=True).start()
+        # Create local progress handler
+        def handle_progress(value):
+            self.progress_bar.setValue(value)
+            QApplication.processEvents()
+        
+        # Connect the progress signal
+        self.drive_sync.sync_progress.connect(handle_progress)
+        
+        # Run sync directly (since we handle threading with processEvents)
+        try:
+            success, message = self.drive_sync.sync_now()
+        finally:
+            # Always disconnect the signal
+            self.drive_sync.sync_progress.disconnect(handle_progress)
 
     def on_sync_started(self):
         """Handle sync started signal."""
@@ -2779,6 +3162,9 @@ class GoogleDriveSyncDialog(QDialog):
     def on_sync_progress(self, progress):
         """Handle sync progress signal."""
         self.progress_bar.setValue(progress)
+
+        # Force the ui to update immediately
+        QApplication.processEvents()
 
     def on_sync_completed(self, success, message):
         """Handle sync completed signal."""
