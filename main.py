@@ -1830,28 +1830,15 @@ class TreasureGoblinApp (QMainWindow):
         type_toggle_layout.addWidget(self.report_income_button)
         top_controls_layout.addLayout(type_toggle_layout)
 
-        # Center - Current period display with nav buttons
-        period_navigation_layout = QHBoxLayout()
+        # Center - Period dropdown selector
+        period_selector_layout = QHBoxLayout()
+        period_selector_layout.addWidget(QLabel("Report Period:"))
 
-        # Previous period button
-        self.prev_period_button = QPushButton("<")
-        self.prev_period_button.setFixedWidth(30)
-        self.prev_period_button.clicked.connect(self.go_to_prev_period)
-        period_navigation_layout.addWidget(self.prev_period_button)
+        self.report_period_combo = QComboBox()
+        self.report_period_combo.setMinimumWidth(150)
+        period_selector_layout.addWidget(self.report_period_combo)
 
-        # Current period label
-        self.report_period_label = QLabel()
-        self.report_period_label.setAlignment(Qt.AlignCenter)
-        self.report_period_label.setFont(QFont("Arial", 14, QFont.Bold))
-        period_navigation_layout.addWidget(self.report_period_label, 1)
-
-        # Next period button
-        self.next_period_button = QPushButton(">")
-        self.next_period_button.setFixedWidth(30)
-        self.next_period_button.clicked.connect(self.go_to_next_period)
-        period_navigation_layout.addWidget(self.next_period_button)
-
-        top_controls_layout.addLayout(period_navigation_layout)
+        top_controls_layout.addLayout(period_selector_layout)
 
         # Right side - Time period toggle (Monthly/Yearly)
         period_toggle_layout = QHBoxLayout()
@@ -1906,45 +1893,133 @@ class TreasureGoblinApp (QMainWindow):
         self.current_report_period = 'monthly'
         self.current_chart_type = 'pie'
 
-        # Initialize current date for reports (use current date)
+        # Intitialize current date for reports (use current date)
         self.current_report_date = QDate.currentDate()
-        self.update_report_period_label()
+
+        # Populate period dropdown and connect signal
+        self.populate_report_period_selector()
+        self.report_period_combo.currentIndexChanged.connect(self.on_report_period_changed)
 
         # Load intial report
         self.generate_report()
 
         return tab
     
-    def update_report_period_label(self):
-        """Update the period label based on current settings."""
-        if self.current_report_period == 'monthly':
-            self.report_period_label.setText(self.current_report_date.toString("MMMM yyyy"))
-        else: # yearly
-            self.report_period_label.setText(str(self.current_report_date.year()))
+    def populate_report_period_selector(self):
+        """Populate the period selector dropdown based on current period type and available data."""
+        # Temporarily disconnect the signal to avoid triggering during population
+        self.report_period_combo.blockSignals(True)
+        self.report_period_combo.clear()
 
-    def go_to_prev_period(self):
-        """Go to the previous month or year."""
-        if self.current_report_period == 'monthly':
-            # Go to previous month
-            self.current_report_date = self.current_report_date.addMonths(-1)
-        else:
-            # Go to previous year
-            self.current_report_date = self.current_report_date.addYears(-1)
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
 
-        self.update_report_period_label()
-        self.generate_report()
+            if self.current_report_period == 'monthly':
+                # Get all unique year-month combinations from transactions
+                query = """
+                    SELECT DISTINCT
+                        strftime('%Y', date) as year,
+                        strftime('%m', date) as month,
+                        strftime('%Y-%m', date) as year_month
+                    FROM transactions
+                    ORDER BY year_month DESC
+                """
 
-    def go_to_next_period(self):
-        """Go to the next month or year."""
-        if self.current_report_period == 'monthly':
-            # Go to next month
-            self.current_report_date = self.current_report_date.addMonths(1)
-        else:
-            # Go to next year
-            self.current_report_date = self.current_report_date.addYears(1)
+                cursor.execute(query)
+                results = cursor.fetchall()
 
-        self.update_report_period_label()
-        self.generate_report()
+                # Add each month-year combination to the dropdown
+                for year, month, year_month in results:
+                    # Convert to readable format
+                    date_obj = datetime.strptime(f"{year}-{month}-01", "%Y-%m-%d")
+                    display_text = date_obj.strftime("%B %Y")
+
+                    # Store as QDate for easy comparison
+                    qdate = QDate(int(year), int(month), 1)
+                    self.report_period_combo.addItem(display_text, qdate)
+
+            else: # yearly
+                # Get all unique years from transactions
+                query = """
+                    SELECT DISTINCT strftime('%Y', date) as year
+                    FROM transactions
+                    ORDER BY year DESC
+                """
+
+                cursor.execute(query)
+                results = cursor.fetchall()
+
+                # Add each year to the dropdown
+                for (year,) in results:
+                    display_text = year
+
+                    # Store as QDate (January 1st of that year)
+                    qdate = QDate(int(year), 1, 1)
+                    self.report_period_combo.addItem(display_text, qdate)
+
+            conn.close()
+
+            # If no transactions exist, add current period as default
+            if self.report_period_combo.count() == 0:
+                current_date = QDate.currentDate()
+                if self.current_report_period == 'monthly':
+                    current_text = current_date.toString("MMMM yyyy")
+                else:
+                    current_text = str(current_date.year())
+                self.report_period_combo.addItem(current_text, current_date)
+
+            # Try to select the current report date if it exists in the list
+            current_index = -1
+            for i in range(self.report_period_combo.count()):
+                combo_date = self.report_period_combo.itemData(i)
+                if self.current_report_period == 'monthly':
+                    # Compare year and month
+                    if (combo_date.year() == self.current_report_date.year() and
+                        combo_date.month() == self.current_report_date.month()):
+                        current_index = i
+                        break
+                else: # yearly
+                    # Compare year only
+                    if combo_date.year() == self.current_report_date.year():
+                        current_index = i
+                        break
+
+            # Set the current selection (defaultes to first item if not found)
+            if current_index >= 0:
+                self.report_period_combo.setCurrentIndex(current_index)
+            else:
+                self.report_period_combo.setCurrentIndex(0)
+
+                # Updated current_report_date to match the selected item
+                if self.report_period_combo.count() > 0:
+                    self.current_report_date = self.report_period_combo.itemData(0)
+        
+        except Exception as e:
+            print(f"Error populating report period selector: {e}")
+
+            # Fallback add current period
+            current_date = QDate.currentDate()
+            if self.current_report_period == 'monthly':
+                current_text = current_date.toString("MMMM yyyy")
+            else:
+                current_text = str(current_date.year())
+            self.report_period_combo.addItem(current_text, current_date)
+            self.current_report_date = current_date
+        
+        finally:
+            # Re-enable signals
+            self.report_period_combo.blockSignals(False)
+
+    def on_report_period_changed(self):
+        """Handle when the user selects a different period from the dropdown."""
+        current_index = self.report_period_combo.currentIndex()
+        if current_index >= 0:
+            # Get the selected date
+            selected_date = self.report_period_combo.itemData(current_index)
+            if selected_date:
+                self.current_report_date = selected_date
+                self.generate_report()
 
     def switch_report_type(self, report_type):
         """Switch between expense and income reports."""
@@ -1956,7 +2031,6 @@ class TreasureGoblinApp (QMainWindow):
             self.report_income_button.setChecked(True)
         
         self.current_report_type = report_type
-        self.update_report_period_label()
         self.generate_report()
 
     def switch_report_period(self, period):
@@ -1969,7 +2043,11 @@ class TreasureGoblinApp (QMainWindow):
             self.report_yearly_button.setChecked(True)
 
         self.current_report_period = period
-        self.update_report_period_label()
+
+        # Repopulate the dropdown with the new period type
+        self.populate_report_period_selector()
+
+        # Generate report for the new period
         self.generate_report()
 
     def switch_chart_type(self, chart_type):
@@ -2132,7 +2210,8 @@ class TreasureGoblinApp (QMainWindow):
         ax.axis('equal')
 
         # Add title based on current report settings
-        period_text = self.report_period_label.text()
+        # Get period text from dropdown
+        period_text = self.report_period_combo.currentText() if self.report_period_combo.currentText() else "Current Period"
         type_text = "Income" if self.current_report_type == 'income' else "Expenses"
         ax.set_title(f"{type_text} Breakdown - {period_text}", fontsize=14, fontweight='bold')
 
@@ -2177,7 +2256,7 @@ class TreasureGoblinApp (QMainWindow):
         ax.grid(axis='x', linestyle='--', alpha=0.7)
 
         # Add title based on current report settings
-        period_text = self.report_period_label.text()
+        period_text = self.report_period_combo.currentText() if self.report_period_combo.currentText() else "Current Period"
         type_text = "Income" if self.current_report_type == 'income' else "Expenses"
         ax.set_title(f"{type_text} Breakdown - {period_text}", fontsize=14, fontweight='bold')
 
