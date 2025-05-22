@@ -70,9 +70,19 @@ class TreasureGoblin:
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
                 type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
+                is_system BOOLEAN DEFAULT FALSE,
                 UNIQUE(name, type)
             )
         ''')
+
+        # Check if is_system column exists, if not, add it
+        cursor.execute("PRAGMA table_info(categories)")
+        columns = [column[1] for column in cursor.fetchall()]
+
+        if 'is_system' not in columns:
+            print("Adding is_system column to categories table...")
+            cursor.execute('ALTER TABLE categories ADD COLUMN is_system BOOLEAN DEFAULT FALSE')
+
 
         # Create transactions table
         cursor.execute('''
@@ -87,6 +97,16 @@ class TreasureGoblin:
         )
         ''')
 
+        # Insert system {NO_CATEGORY} categories first
+        cursor.execute('''
+            INSERT OR IGNORE INTO CATEGORIES (name, type, is_system)
+            VALUES ('{NO_CATEGORY}', 'income', TRUE)           
+        ''')
+        cursor.execute('''
+            INSERT OR IGNORE INTO CATEGORIES (name, type, is_system)
+            VALUES ('{NO_CATEGORY}', 'expense', TRUE)
+        ''')
+
         # Insert default categories
         default_income_categories = ['Paycheck','Freelance', 'Investment', 'Gift', 'Other Income']
         default_expense_categories = ['Grocery', 'Housing', 'Transportation', 'Utilities', 'Entertainment', 'Dining', 'Healthcare',
@@ -94,11 +114,14 @@ class TreasureGoblin:
         
         # Insert income categories
         for category in default_income_categories:
-            cursor.execute('INSERT OR IGNORE INTO categories (name, type) VALUES (?, ?)', (category, 'income'))
+            cursor.execute('INSERT OR IGNORE INTO categories (name, type, is_system) VALUES (?, ?, ?)', (category, 'income', False))
 
         # Insert expense categories
         for category in default_expense_categories:
-            cursor.execute('INSERT OR IGNORE INTO categories (name, type) VALUES (?, ?)', (category, 'expense'))
+            cursor.execute('INSERT OR IGNORE INTO categories (name, type, is_system) VALUES (?, ?, ?)', (category, 'expense', False))
+
+        # Update existing categories to have is_system = FALSE if it's currently NULL
+        cursor.execute('UPDATE categories SET is_system = FALSE WHERE is_system IS NULL')
 
         # Commit changes and close connection
         conn.commit()
@@ -228,6 +251,24 @@ class TreasureGoblin:
         conn.close()
         return transactions
     
+    def get_no_category_id(self, transaction_type):
+        """Get the ID of the {NO_CATEGORY} for the specified transaction type."""
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id FROM categories WHERE name = '{NO_CATEGORY}' AND type = ?",
+            (transaction_type)
+        )
+        result = cursor.fetchone()
+        conn.close()
+
+        if result:
+            return result[0]
+        else:
+            # This should never happen if setup_database ran correctly
+            raise Exception(f"System category {{NO_CATEGORY}} not found for type {transaction_type}")
+    
 class TreasureGoblinApp (QMainWindow):
     """Main application window for TreasureGoblin"""
     def __init__(self, treasuregoblin):
@@ -316,11 +357,23 @@ class TreasureGoblinApp (QMainWindow):
         """Handle actions when tabs are changed."""
         # When switching to transactions tab (index 1), update category options
         if index == 1:
+            # Update category options for the form
             self.update_category_options()
 
-        # When swtiching to dahsboard tab (index 0), update dahsboard
+            #  Refresh the month selector to include any new months from recent transactions
+            self.populate_month_selector()
+
+            # Refresh the transaction list to show any changes
+            self.load_transactions_for_month()
+
+        # When swtiching to dahsboard tab (index 0), update dashboard
         elif index == 0:
             self.update_dashboard()
+
+        # When switching to reports tab (index 3), refresh the period selector
+        elif index == 3:
+            # Refresh the reports period selector in case new data was added
+            self.populate_month_selector()
 
     def create_dashboard_tab(self):
         """Create the dashboard tab with summary information."""
@@ -912,13 +965,13 @@ class TreasureGoblinApp (QMainWindow):
         # Get transaction type (conver to lowercase for database query)
         transaction_type = self.transaction_type_combo.currentText().lower()
 
-        # Get categories from database
+        # Get categories from database (exclude system categories)
         try:
             conn = self.get_db_connection()
             cursor = conn.cursor()
 
             cursor.execute(
-                "SELECT name FROM categories WHERE type = ? ORDER BY name",
+                "SELECT name FROM categories WHERE type = ? AND (is_system IS NULL OR is_system = FALSE) ORDER BY name",
                 (transaction_type,)
             )
 
@@ -990,7 +1043,13 @@ class TreasureGoblinApp (QMainWindow):
                  item.setData(Qt.UserRole, transaction['id'])  # Store transaction ID
 
                  # Create a label with rich text
-                 label = QLabel(f"{date_obj} {description} <span style='color:{amount_color}'>{amount_str}</span>")
+                 if transaction['category'] == '{NO_CATEGORY}':
+                    label = QLabel(f"<i>{date_obj} <b>{description}</b> <span style='color:{amount_color}'>{amount_str}</span></i>")
+                    label.setStyleSheet("background-color: #FFF3CD; border-left: 3px solid #856404; padding: 2px;")
+                    label.setToolTip("This transaction needs a category assignment")
+                 else:
+                    label = QLabel(f"{date_obj} {description} <span style='color:{amount_color}'>{amount_str}</span>")
+                
                  label.setTextFormat(Qt.RichText)
                 
                  # Add item to list and set custom widget
@@ -1588,12 +1647,12 @@ class TreasureGoblinApp (QMainWindow):
                 item.widget().deleteLater()
 
         try:
-            # Get categories from database
+            # Get categories from database (exclude system categories)
             conn = self.get_db_connection()
             cursor = conn.cursor()
 
             cursor.execute(
-                    "SELECT id, name FROM categories WHERE type = ?",
+                    "SELECT id, name FROM categories WHERE type = ? AND (is_system IS NULL OR is_system = FALSE)",
                     (self.current_category_type,)
             )
 
@@ -1737,15 +1796,39 @@ class TreasureGoblinApp (QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to update category: {str(e)}")
 
     def delete_category(self, category_id, category_name):
-        """Delete a category after confirmation."""
-        # Check if category is in use
+        """Delete a category after confirmation and reassign transactions to {NO_CATEGORY}."""
         try:
             conn = self.get_db_connection()
             cursor = conn.cursor()
 
+            # Check if this is a system category (shouldn't happen, but safety check)
+            cursor.execute(
+                "SELECT is_system FROM categories WHERE id = ?",
+                (category_id,)
+            )
+            is_system_result = cursor.fetchone()
+            if is_system_result and is_system_result[0]:
+                QMessageBox.warning(self, "Cannot Delete", "System categories cannot be deleted.")
+                conn.close()
+                return
+
+            # Get the category type to determine which {NO_CATEGORY} to use
+            cursor.execute(
+                "SELECT type FROM categories WHERE id = ?",
+                (category_id,)
+            )
+            category_type_result = cursor.fetchone()
+            if not category_type_result:
+                QMessageBox.warning(self, "Error", "Category not found.")
+                conn.close()
+                return
+            
+            category_type = category_type_result[0]
+
+            # Check if category is in use
             cursor.execute(
                 "SELECT COUNT(*) FROM transactions WHERE category_id = ?",
-                    (category_id,)
+                (category_id,)
             )
             
             usage_count = cursor.fetchone()[0]
@@ -1753,8 +1836,9 @@ class TreasureGoblinApp (QMainWindow):
             if usage_count > 0:
                 reply = QMessageBox.question(
                     self, "Category In Use",
-                    f"The category '{category_name}' is used in {usage_count} transactions. "
-                    "Deleting it will affect those transactions. Proceed?",
+                    f"The category '{category_name}' is used in {usage_count} transactions.\n\n"
+                    "Deleting it will move those transactions to {NO_CATEGORY} where you can "
+                    "reassign them to other categories if needed.\n\nProceed?",
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                 )
 
@@ -1772,22 +1856,58 @@ class TreasureGoblinApp (QMainWindow):
                     conn.close()
                     return
 
-            # Delete the category
-            cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
-            conn.commit()
-
-            QMessageBox.information(
-                self, "Success", f"Category '{category_name}' deleted successfully!"
+            # Get the {NO_CATEGORY} ID for this transaction type
+            cursor.execute(
+                "SELECT id FROM categories WHERE name = '{NO_CATEGORY}' AND type = ?",
+                (category_type,)
             )
+            no_category_result = cursor.fetchone()
+            if not no_category_result:
+                QMessageBox.critical(self, "Error", "System {NO_CATEGORY} not found. Database may be corrupted.")
+                conn.close()
+                return
+            
+            no_category_id = no_category_result[0]
 
-            # Reload categories
-            self.load_categories()
+            # Begin transaction
+            cursor.execute("BEGIN")
+
+            try:
+                # Reassign all transactions from the deleted category to {NO_CATEGORY}
+                cursor.execute(
+                    "UPDATE transactions SET category_id = ? WHERE category_id = ?",
+                    (no_category_id, category_id)
+                )
+
+                # Delete the category
+                cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+
+                # Commit the transaction
+                cursor.execute("COMMIT")
+
+                if usage_count > 0:
+                    QMessageBox.information(
+                        self, "Success", 
+                        f"Category '{category_name}' deleted successfully!\n\n"
+                        f"{usage_count} transactions have been moved to {{NO_CATEGORY}}. "
+                        "You can find and reassign them in the Transactions tab."
+                    )
+                else:
+                    QMessageBox.information(
+                        self, "Success", f"Category '{category_name}' deleted successfully!"
+                    )
+
+                # Reload categories
+                self.load_categories()
+
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                raise e
 
             conn.close()
-    
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to delete category: {str(e)}")
-
 
     def get_db_connection(self):
         """Get a connection to the SQLite database."""
@@ -2118,24 +2238,13 @@ class TreasureGoblinApp (QMainWindow):
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
-        check_query = """
-            SELECT COUNT(*) as count,
-                    MIN(date) as earliest_date,
-                    MAX(date) as latest_date
-            FROM transactions t
-            WHERE t.type = ? AND t.date BETWEEN ? AND ?
-        """
-
-        cursor.execute(check_query, (self.current_report_type, start_date, end_date))
-        check_result = cursor.fetchone()
-
         query = """
             SELECT
                 c.name as category,
                 SUM(t.amount) as total
             FROM transactions t
             JOIN categories c ON t.category_id = c.id
-            WHERE t.type = ? AND t.date BETWEEN ? AND ?
+            WHERE t.type = ? AND t.date BETWEEN ? AND ? AND c.name != '{NO_CATEGORY}'
             GROUP BY c.name
             ORDER BY total DESC
         """
