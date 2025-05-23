@@ -39,13 +39,20 @@ class TreasureGoblin:
     from now!
     """
 
-    def __init__(self, db_path = "treasuregoblin.db"):
+    def __init__(self, db_path =None):
         """
         Initialize the SQLite database for TreasureGoblin with necessary tables.
 
         Args:
             db_path: Path to the SQLite database file
         """
+
+        if db_path is None:
+            # Use user's home directory for data
+            user_data_dir = Path.home() / ".treasuregoblin"
+            user_data_dir.mkdir(exist_ok=True)
+            db_path = user_data_dir / "treasuregoblin.db"
+
         self.db_path = db_path
         self.app_dir = Path.home() / ".treasuregoblin"
         self.media_dir = self.app_dir / "media"
@@ -2776,8 +2783,12 @@ class GoogleDriveSync(QObject):
     def __init__(self, treasure_goblin):
         super().__init__()
         self.treasure_goblin = treasure_goblin
+
+        self.user_config_dir = Path.home() / ".treasuregoblin"
+        self.user_config_dir.mkdir(exist_ok=True)
+    
         self.app_dir = treasure_goblin.app_dir
-        self.config_file = self.app_dir / "drive_sync.json"
+        self.config_file = self.user_config_dir / "drive_sync.json"
 
         # Default configuration
         self.config = {
