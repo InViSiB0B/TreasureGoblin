@@ -20,9 +20,10 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QFormLayout, QGroupBox, QSplitter, QTabWidget,
                              QMessageBox, QComboBox, QScrollArea, QFrame, QLineEdit, 
                              QDateEdit, QDateTimeEdit, QSpinBox, QListWidgetItem, QGridLayout, QInputDialog,
-                             QMenu, QFileDialog, QDialog, QCheckBox, QProgressBar)
-from PyQt5.QtCore import Qt, QDate, QDateTime, QObject, pyqtSignal, QTimer, QThread
-from PyQt5.QtGui import QIcon, QFont, QPixmap
+                             QMenu, QFileDialog, QDialog, QCheckBox, QProgressBar, QFrame, QGraphicsDropShadowEffect,
+                             QHBoxLayout, QVBoxLayout)
+from PyQt5.QtCore import Qt, QDate, QDateTime, QObject, pyqtSignal, QTimer, QThread, QPropertyAnimation, QEasingCurve
+from PyQt5.QtGui import QIcon, QFont, QPixmap, QPalette, QColor, QLinearGradient, QPainter, QBrush
 from pathlib import Path
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -322,16 +323,18 @@ class TreasureGoblinApp (QMainWindow):
             self.setWindowTitle("TreasureGoblin - Your Income & Expense Tracker")
             self.setGeometry(100, 100, 1000, 800)
 
+            # Apply theme
+            self.setStyleSheet(TreasureGoblinTheme.get_stylesheet())
+
             # Create the central widget and main layout
             central_widget = QWidget()
             self.setCentralWidget(central_widget)
             main_layout = QVBoxLayout(central_widget)
+            main_layout.setContentsMargins(0, 0, 0, 0)
 
             # Header with application title
-            header_label = QLabel("TreasureGoblin")
-            header_label.setFont(QFont("Arial", 18, QFont.Bold))
-            header_label.setAlignment(Qt.AlignCenter)
-            main_layout.addWidget(header_label)
+            header = self.create_header()
+            main_layout.addWidget(header)
 
             # Create tab widget
             self.tabs = QTabWidget()
@@ -355,6 +358,40 @@ class TreasureGoblinApp (QMainWindow):
             # Footer with status information
             status_bar = self.statusBar()
             status_bar.showMessage("Ready")
+
+    def create_header(self):
+        """Create a themed header for the application"""
+        header = QWidget()
+        header.setFixedHeight(80)
+        header.setStyleSheet(f"""
+            background-color: {TreasureGoblinTheme.COLORS['surface']};
+            border-bottom: 3px solid {TreasureGoblinTheme.COLORS['accent']};                        
+        """)
+
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(20, 10, 20, 10)
+
+        # Title
+        title = QLabel("TreasureGoblin")
+        title.setStyleSheet(f"""
+            color: {TreasureGoblinTheme.COLORS['accent']};    
+            font-size: 32px;
+            font-weight: bold;
+            font-family: Georgia;
+        """)
+        layout.addWidget(title)
+
+        layout.addStretch()
+
+        # Status indicators
+        sync_status = QLabel("Synced")
+        sync_status.setStyleSheet(f"""
+            color: {TreasureGoblinTheme.COLORS['success_light']};
+            font-size: 12px;                      
+        """)
+        layout.addWidget(sync_status)
+
+        return header
 
     def get_db_connection(self):
         """Relay database connection to the data manager."""
@@ -664,7 +701,7 @@ class TreasureGoblinApp (QMainWindow):
                 percentage = (difference / abs(previous_net)) * 100
 
             # Set color based on whether the difference is positive or negative
-            color = "green" if difference >= 0 else "red"
+            color = TreasureGoblinTheme.COLORS['success_light'] if difference >= 0 else TreasureGoblinTheme.COLORS['danger_light']
             self.difference_label.setText(f"$ {difference:.2f} ({percentage:.2f}%)")
             self.difference_label.setStyleSheet(f"color: {color};")
 
@@ -692,18 +729,59 @@ class TreasureGoblinApp (QMainWindow):
                 
                  # Create item
                 item = QListWidgetItem()
+                
+                # Create container widget
+                item_widget = QWidget()
+                item_layout = QHBoxLayout(item_widget)
+                item_layout.setContentsMargins(10, 5, 10, 5)
+
+                # Date label
+                date_label = QLabel(date_obj)
+                date_label.setStyleSheet(f"""
+                    color: {TreasureGoblinTheme.COLORS['text_secondary']}; 
+                    font-size: 11px;
+                    min-width: 55px;
+                """)
+                item_layout.addWidget(date_label)
+
+                # Description label
+                desc_label = QLabel(description)
+                desc_label.setStyleSheet(f"""
+                    color: {TreasureGoblinTheme.COLORS['text_primary']}; 
+                    font-size: 11px;
+                    padding-left: 10px;
+                """)
+                item_layout.addWidget(desc_label)
+
+                # Spacer
+                item_layout.addStretch()
+
+                # Amount label
+                if type == 'income':
+                    amount_color = TreasureGoblinTheme.COLORS['success_light']  # Green for income
+                else:
+                    amount_color = TreasureGoblinTheme.COLORS['danger_light']   # Red for expenses
+
+                amount_label = QLabel(f"${amount:.2f}")
+                amount_label.setStyleSheet(f"""
+                    color: {amount_color};
+                    font-weight: bold;
+                    font-family: Consolas;
+                    font-size: 12px;
+                    min-width: 70px;
+                    text-align: right;
+                """)
+                amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                item_layout.addWidget(amount_label)
+
+                # Set the widget size
+                item_widget.setMinimumHeight(30)
+
+                # Add to list
                 self.transactions_list.addItem(item)
-                
-                # Create a label with rich text 
-                amount_color = "green" if type == 'income' else "red"
-                label = QLabel(f"{date_obj} {description} $ <span style='color:{amount_color}'>{amount:.2f}</span>")
-                label.setTextFormat(Qt.RichText)
-                
-                # Set the custom widget for the item
-                self.transactions_list.setItemWidget(item, label)
-                
-                # Set appropriate item size
-                item.setSizeHint(label.sizeHint())
+                self.transactions_list.setItemWidget(item, item_widget)
+
+                item.setSizeHint(item_widget.sizeHint())
 
             conn.close()
 
@@ -2768,7 +2846,392 @@ class TreasureGoblinImportExport:
                 current_conn.close()
             if import_conn:
                 import_conn.close()
+
+class TreasureGoblinTheme:
+    """Central theme manager"""
+
+    # Main color palette
+    COLORS = {
+        # Primary colors
+        'primary_dark': '#1B4332',
+        'primary': '#2D6A4F',
+        'primary_light': '#40916C',
+        'primary_lighter': '#52B788',
+
+        # Accent colors
+        'accent_dark': '#D4A574',
+        'accent': '#FFB700',
+        'accent_light': '#FFD60A',
+
+        # Supporting colors
+        'danger': '#9D0208',
+        'danger_light': '#DC2F02',
+        'success': '#2D6A4F',
+        'success_light': '#40916C',
+
+        # Neutral colors
+        'background': '#0D1B2A',
+        'surface': '#1B263B',
+        'surface_light': '#415A77',
+        'text_primary': '#E0E1DD',
+        'text_secondary': '#778DA9',
+
+        # Special effects
+        'glow': '#FFD60A',
+        'shadow': '#000814',
+    }
+
+    # Typography
+    FONTS = {
+        'heading': ('Georgia', 24, QFont.Bold),
+        'subheading': ('Georgia', 18, QFont.Bold),
+        'body': ('Segoe UI', 11, QFont.Normal),
+        'button': ('Segoe UI', 10, QFont.Bold),
+        'small': ('Segoe UI', 9, QFont.Normal),
+        'number': ('Consolas', 14, QFont.Bold),
+    }
+
+    @staticmethod
+    def get_stylesheet():
+        """Generate the main stylesheet"""
+        c = TreasureGoblinTheme.COLORS
+        return f"""
+        /* Main Window */
+        QMainWindow {{
+            background-color: {c['background']};
+        }}
+        
+        /* Central Widget */
+        QWidget {{
+            background-color: {c['background']};
+            color: {c['text_primary']};
+        }}
+        
+        /* Tab Widget */
+        QTabWidget::pane {{
+            background-color: {c['surface']};
+            border: 2px solid {c['primary_dark']};
+            border-radius: 8px;
+            margin-top: -2px;
+        }}
+        
+        QTabBar::tab {{
+            background-color: {c['surface_light']};
+            color: {c['text_secondary']};
+            padding: 15px 30px;
+            margin-right: 4px;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            font-weight: bold;
+            font-size: 12px;
+            min-width: 100px;
+        }}
+        
+        QTabBar::tab:selected {{
+            background-color: {c['primary']};
+            color: {c['text_primary']};
+            border-bottom: 3px solid {c['accent']};
+        }}
+        
+        QTabBar::tab:hover {{
+            background-color: {c['primary_light']};
+            color: {c['text_primary']};
+        }}
+        
+        /* Group Boxes */
+        QGroupBox {{
+            background-color: {c['surface']};
+            border: 2px solid {c['primary_dark']};
+            border-radius: 8px;
+            margin-top: 12px;
+            padding-top: 10px;
+            font-weight: bold;
+            color: {c['accent']};
+        }}
+        
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 10px 0 10px;
+            background-color: {c['surface']};
+            color: {c['accent']};
+        }}
+        
+        /* Buttons */
+        QPushButton {{
+            background-color: {c['primary']};
+            color: {c['text_primary']};
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: bold;
+            min-height: 32px;
+        }}
+        
+        QPushButton:hover {{
+            background-color: {c['primary_light']};
+            border: 2px solid {c['accent']};
+        }}
+        
+        QPushButton:pressed {{
+            background-color: {c['primary_dark']};
+        }}
+        
+        QPushButton:disabled {{
+            background-color: {c['surface_light']};
+            color: {c['text_secondary']};
+        }}
+        
+        /* Accent Buttons */
+        QPushButton#accentButton {{
+            background-color: {c['accent']};
+            color: {c['background']};
+        }}
+        
+        QPushButton#accentButton:hover {{
+            background-color: {c['accent_light']};
+        }}
+        
+        /* Danger Buttons */
+        QPushButton#dangerButton {{
+            background-color: {c['danger']};
+        }}
+        
+        QPushButton#dangerButton:hover {{
+            background-color: {c['danger_light']};
+        }}
+        
+        /* List Widgets */
+        QListWidget {{
+            background-color: {c['surface']};
+            border: 2px solid {c['primary_dark']};
+            border-radius: 8px;
+            padding: 5px;
+            outline: none;
+            alternate-background-color: {c['surface']};
+        }}
+        
+        QListWidget::item {{
+            background-color: transparent;
+            border: none;
+            border-radius: 0px;
+            padding: 0px;
+            margin: 2px 0;
+        }}
+        
+        QListWidget::item:selected {{
+            background-color: rgba(45, 106, 79, 0.2);
+            border: none;
+        }}
+        
+        QListWidget::item:hover {{
+            background-color: rgba(45, 106, 79, 0.1);
+            border: none;
+        }}
+
+        QListWidget::item:foucus {{
+            outline: none;
+            border: none;
+        }}
+        
+        /* Input Fields */
+        QLineEdit, QDateEdit, QComboBox {{
+            background-color: {c['surface_light']};
+            border: 2px solid {c['primary_dark']};
+            border-radius: 6px;
+            padding: 6px 10px;
+            color: {c['text_primary']};
+            font-size: 11px;
+        }}
+        
+        QLineEdit:focus, QDateEdit:focus, QComboBox:focus {{
+            border: 2px solid {c['accent']};
+            background-color: {c['surface']};
+        }}
+        
+        QComboBox::drop-down {{
+            border: none;
+            width: 30px;
+        }}
+        
+        QComboBox::down-arrow {{
+            image: none;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid {c['text_primary']};
+            margin-right: 5px;
+        }}
+        
+        /* Labels */
+        QLabel {{
+            color: {c['text_primary']};
+        }}
+        
+        QLabel#headingLabel {{
+            color: {c['accent']};
+            font-size: 24px;
+            font-weight: bold;
+            font-family: Georgia;
+        }}
+        
+        QLabel#subheadingLabel {{
+            color: {c['accent_light']};
+            font-size: 18px;
+            font-weight: bold;
+        }}
+        
+        /* Frames */
+        QFrame#cardFrame {{
+            background-color: {c['surface']};
+            border: 2px solid {c['primary_dark']};
+            border-radius: 12px;
+            padding: 15px;
+        }}
+        
+        /* Scrollbars */
+        QScrollBar:vertical {{
+            background-color: {c['surface']};
+            width: 12px;
+            border-radius: 6px;
+        }}
+        
+        QScrollBar::handle:vertical {{
+            background-color: {c['primary']};
+            border-radius: 6px;
+            min-height: 20px;
+        }}
+        
+        QScrollBar::handle:vertical:hover {{
+            background-color: {c['primary_light']};
+        }}
+        
+        /* Status Bar */
+        QStatusBar {{
+            background-color: {c['surface']};
+            color: {c['text_secondary']};
+            border-top: 2px solid {c['primary_dark']};
+        }}
+        """
     
+class GoblinCard(QFrame):
+    """Custom card widget with styling"""
+
+    def __init__(self, title="", parent=None):
+        super().__init__(parent)
+        self.setObjectName("cardFrame")
+        self.title = title
+        self.setup_ui()
+        self.apply_effects()
+
+    def setup_ui(self):
+        self.layout = QVBoxLayout(self)
+        self.layout.setSpacing(10)
+
+        if self.title:
+            title_label = QLabel(self.title)
+            title_label.setObjectName("subheadingLabel")
+            self.layout.addWidget(title_label)
+
+    def apply_effects(self):
+        # Adding drop shadow for more depth
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(TreasureGoblinTheme.COLORS['shadow']))
+        self.setGraphicsEffect(shadow)
+
+class TreasureButton(QPushButton):
+    """Button with hover animations"""
+    
+    def __init__(self, text, button_type="primary", parent=None):
+        super().__init__(text, parent)
+        self.button_type = button_type
+        self.setup_style()
+
+    def setup_style(self):
+        if self.button_type == "accent":
+            self.setObjectName("accentButton")
+        elif self.button_type == "danger":
+            self.setObjectName("dangerButton")
+
+    def enterEvent(self, event):
+        # TODO ADD ANIMATION HERE
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        # TODO ADD ANIMATION HERE
+        super().leaveEvent(event)
+
+class MoneyDisplay(QWidget):
+    """Custom widget for displaying monetary values"""
+
+    def __init__(self, label="", amount=0.0, is_positive=True, parent=None):
+        super().__init__(parent)
+        self.label = label
+        self.amount = amount
+        self.is_positive = is_positive
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        if self.label:
+            label_widget = QLabel(self.label)
+            label_widget.setStyleSheet(f"color: {TreasureGoblinTheme.COLORS['text_secondary']};")
+            layout.addWidget(label_widget)
+
+        amount_label = QLabel(f"${self.amount:,.2f}")
+        color = TreasureGoblinTheme.COLORS['success_light'] if self.is_positive else TreasureGoblinTheme.COLORS['danger_light']
+        amount_label.setStyleSheet(f"""
+              color: {color};
+              font-family: Consolas;
+              font-size: 16px;
+              font-weight: bold;   
+        """)
+        layout.addWidget(amount_label)
+        layout.addStretch()
+
+    def update_amount(self, amount, is_positive=None):
+        self.amount = amount
+        if is_positive is not None:
+            self.is_positive = is_positive
+        # Update the display
+        self.setup_ui()
+
+class CategoryButton(QPushButton):
+    """Special button for category display with visuals"""
+
+    def __init__(self, text, category_type="expense", parent=None):
+        super().__init__(text, parent)
+        self.category_type = category_type
+        self.setMinimumSize(120, 60)
+        self.setup_style()
+
+    def setup_style(self):
+        c = TreasureGoblinTheme.COLORS
+        if self.category_type == "expense":
+            bg_color = c['danger']
+            hover_color = c['danger_light']
+        else:
+            bg_color = c['success']
+            hover_color = c['success_light']
+
+        self.setStyleSheet(f"""
+            QPushButton{{
+                background-color: {bg_color};
+                color: {c['text_primary']};
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 12px;           
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
+                border: 2px solid {c['accent']};
+            }}                                             
+        """)    
 class GoogleDriveSync(QObject):
     """Class for handling Google Drive synchronization of TreasureGoblin data."""
 
