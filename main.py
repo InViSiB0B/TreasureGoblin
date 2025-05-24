@@ -808,17 +808,6 @@ class TreasureGoblinApp (QMainWindow):
         self.month_combo = QComboBox()
         
         month_selector_layout.addWidget(self.month_combo)
-
-        # # Add months (last 12 months)
-        # current_date = QDate.currentDate()
-        # for i in range(12):
-        #     # Calculate month and year
-        #     date = current_date.addMonths(-i)
-        #     month_year = date.toString("MMMM yyyy")
-        #     self.month_combo.addItem(month_year, (date.month(), date.year()))
-        
-        # self.month_combo.currentIndexChanged.connect(self.load_transactions_for_month)
-        # month_selector_layout.addWidget(self.month_combo)
         
         transactions_list_layout.addLayout(month_selector_layout)
 
@@ -1118,31 +1107,77 @@ class TreasureGoblinApp (QMainWindow):
                  description = transaction['category']
                  if transaction['tag']:
                      description += f" ({transaction['tag']})"
-
-                 # Format amount with color based on type
-                 amount_color = "green" if transaction['type'] == 'income' else "red"
-                 amount_str = f"${transaction['amount']:.2f}"
                 
                  # Create a custom widget item
                  item = QListWidgetItem()
                  item.setData(Qt.UserRole, transaction['id'])  # Store transaction ID
 
-                 # Create a label with rich text
+                 # Create container widget with proper layout
+                 item_widget = QWidget()
+                 item_layout = QHBoxLayout(item_widget)
+                 item_layout.setContentsMargins(10, 8, 10, 8)
+
+                 # Check if it's a no-category transaction
                  if transaction['category'] == '{NO_CATEGORY}':
-                    label = QLabel(f"<i>{date_obj} <b>{description}</b> <span style='color:{amount_color}'>{amount_str}</span></i>")
-                    label.setStyleSheet("background-color: #FFF3CD; border-left: 3px solid #856404; padding: 2px;")
-                    label.setToolTip("This transaction needs a category assignment")
+                     # Warning icon for no category
+                     warning_label = QLabel("⚠️")
+                     warning_label.setStyleSheet("font-size: 14px;")
+                     item_layout.addWidget(warning_label)
+
+                # Date
+                 date_label = QLabel(date_obj)
+                 date_label.setStyleSheet(f"""
+                     color: {TreasureGoblinTheme.COLORS['text_secondary']}
+                     font-size: 12px;
+                     min-width: 60px;
+                 """)
+                 item_layout.addWidget(date_label)
+
+                 # Category and tag
+                 desc_label = QLabel(description)
+                 desc_label.setStyleSheet(f"""
+                     color: {TreasureGoblinTheme.COLORS['text_primary']};
+                     font-size: 12px;
+                     padding-left: 10px;
+                 """)
+                 item_layout.addWidget(desc_label)
+
+                 # Spacer
+                 item_layout.addStretch()
+
+                 # Amount with proprer color based on type
+                 if transaction['type'] == 'income':
+                     amount_color = TreasureGoblinTheme.COLORS['success_light'] # Green for income
                  else:
-                    label = QLabel(f"{date_obj} {description} <span style='color:{amount_color}'>{amount_str}</span>")
-                
-                 label.setTextFormat(Qt.RichText)
-                
-                 # Add item to list and set custom widget
+                    amount_color = TreasureGoblinTheme.COLORS['danger_light'] # Red for expenses
+
+                 amount_label = QLabel(f"${transaction['amount']:.2f}")
+                 amount_label.setStyleSheet(f"""
+                     color: {amount_color};
+                     font-weight: bold;
+                     font-family: Consolas;
+                     font-size: 14px;
+                     min-width: 80px;
+                     text-align: right;                    
+                 """)
+                 amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                 item_layout.addWidget(amount_label)
+
+                 # Special styling for no-category items
+                 if transaction['category'] == "{NO_CATEGORY}":
+                     item_widget.setStyleSheet(f"""
+                         background-color: {TreasureGoblinTheme.COLORS['surface']};
+                         border-left: 3px solid {TreasureGoblinTheme.COLORS['accent']};
+                         border-radius: 4px;                      
+                     """)
+                     item_widget.setToolTip("This transaction needs a category assignment")
+
+                 # Add item to list
                  self.transactions_list_widget.addItem(item)
-                 self.transactions_list_widget.setItemWidget(item, label)
-                
-                 # Set appropriate item size
-                 item.setSizeHint(label.sizeHint())
+                 self.transactions_list_widget.setItemWidget(item, item_widget)
+
+                 # Set size hint to ensure proper display
+                 item.setSizeHint(item_widget.sizeHint()) 
             
         except Exception as e:
             print(f"Error loading transactions: {e}")
@@ -2953,8 +2988,10 @@ class TreasureGoblinTheme:
             subcontrol-origin: margin;
             left: 10px;
             padding: 0 10px 0 10px;
-            background-color: {c['surface']};
+            background-color: transparent;
             color: {c['accent']};
+            font-size: 16px;
+            font-family: Georgia;
         }}
         
         /* Buttons */
