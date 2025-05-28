@@ -570,19 +570,48 @@ class TreasureGoblinApp (QMainWindow):
         layout.addWidget(recent_title)
 
         recent_group = QGroupBox()
-        recent_group.setStyleSheet(f"""f
+        recent_group.setStyleSheet(f"""
             QGroupBox {{
                 background-color: {TreasureGoblinTheme.COLORS['surface']};
                 border: 2px solid {TreasureGoblinTheme.COLORS['primary_dark']};
                 border-radius: 8px;
-                padding-top: 10px;
+                padding: 0px;
             }}
         """)
         recent_layout = QVBoxLayout(recent_group)
         
         self.transactions_list = QListWidget()
         self.transactions_list.setMaximumHeight(250)
-        self.transactions_list.setStyleSheet("font-size: 14px;")
+        self.transactions_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {TreasureGoblinTheme.COLORS['surface']};
+                border: none;
+                border-radius: 0px;
+                padding: 8px;
+                outline: none;
+                font-size: 14px;
+            }}
+            QListWidget::item {{
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                margin: 3px 0;
+                min-height: 35px;
+            }}
+            QListWidget::item:selected {{
+                background-color: rgba(45, 106, 79, 0.3);
+                border: none;
+            }}
+            QListWidget::item:hover {{
+                background-color: rgba(45, 106, 79, 0.15);
+                border: none;
+            }}
+            QListWidget::item:focus {{
+                outline: none;
+                border: none;
+            }}
+        """)
         recent_layout.addWidget(self.transactions_list)
         layout.addWidget(recent_group)
         
