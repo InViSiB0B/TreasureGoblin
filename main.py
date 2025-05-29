@@ -2051,28 +2051,76 @@ class TreasureGoblinApp (QMainWindow):
         # Check if we need to sync with Google Drive
         if hasattr(self.treasure_goblin, 'drive_sync'):
             if self.treasure_goblin.drive_sync.should_sync_on_close():
-                reply = QMessageBox.question(
-                    self, 
-                    "Sync to Google Drive", 
-                    "Sync your data to Google Drive before closing?",
-                    QMessageBox.Yes | QMessageBox.No, 
-                    QMessageBox.Yes
-                )
+                # Create simple message box with basic font improvements
+                reply_dialog = QMessageBox(self)
+                reply_dialog.setWindowTitle("Sync to Google Drive")
+                reply_dialog.setText("Sync your data to Google Drive before closing?")
+                reply_dialog.setInformativeText("This will backup your financial data to the cloud for safekeeping.")
+                
+                # Simple font styling that won't break the layout
+                reply_dialog.setStyleSheet("""
+                    QMessageBox {
+                        font-size: 14px;
+                    }
+                    QMessageBox QLabel {
+                        font-size: 14px;
+                        margin: 10px;
+                    }
+                    QMessageBox QPushButton {
+                        font-size: 13px;
+                        font-weight: bold;
+                        padding: 8px 16px;
+                        margin: 4px;
+                        min-width: 70px;
+                        min-height: 30px;
+                    }
+                """)
+                
+                # Set icon and buttons
+                reply_dialog.setIcon(QMessageBox.Question)
+                reply_dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                reply_dialog.setDefaultButton(QMessageBox.Yes)
+                
+                reply = reply_dialog.exec_()
                 
                 if reply == QMessageBox.Yes:
-                    # Show a progress dialog
+                    # Show a simple progress dialog
                     progress_dialog = QDialog(self)
                     progress_dialog.setWindowTitle("Syncing to Google Drive")
-                    progress_dialog.setFixedSize(300, 100)
+                    progress_dialog.setFixedSize(350, 120)
+                    progress_dialog.setModal(True)
                     
                     dialog_layout = QVBoxLayout(progress_dialog)
+                    dialog_layout.setContentsMargins(20, 15, 20, 15)
+                    dialog_layout.setSpacing(10)
                     
+                    # Status label
                     status_label = QLabel("Syncing data to Google Drive before closing...")
+                    status_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+                    status_label.setAlignment(Qt.AlignCenter)
                     dialog_layout.addWidget(status_label)
                     
+                    # Progress bar
                     progress_bar = QProgressBar()
                     progress_bar.setRange(0, 100)
                     progress_bar.setValue(0)
+                    progress_bar.setTextVisible(True)
+                    progress_bar.setFormat("%p%")
+                    progress_bar.setStyleSheet("""
+                        QProgressBar {
+                            font-size: 12px;
+                            font-weight: bold;
+                            text-align: center;
+                            min-height: 20px;
+                            border: 1px solid #ccc;
+                            border-radius: 3px;
+                            background-color: #f0f0f0;
+                        }
+                        QProgressBar::chunk {
+                            background-color: #4285F4;
+                            border-radius: 2px;
+                        }
+                    """)
                     dialog_layout.addWidget(progress_bar)
                     
                     # Connect signals
@@ -2090,7 +2138,29 @@ class TreasureGoblinApp (QMainWindow):
                     progress_dialog.close()
                     
                     if not success:
-                        QMessageBox.warning(self, "Sync Failed", message)
+                        # Simple error dialog
+                        error_dialog = QMessageBox(self)
+                        error_dialog.setIcon(QMessageBox.Warning)
+                        error_dialog.setWindowTitle("Sync Failed")
+                        error_dialog.setText("Failed to sync to Google Drive")
+                        error_dialog.setInformativeText(message)
+                        error_dialog.setStyleSheet("""
+                            QMessageBox {
+                                font-size: 13px;
+                            }
+                            QMessageBox QLabel {
+                                font-size: 13px;
+                                margin: 8px;
+                            }
+                            QMessageBox QPushButton {
+                                font-size: 12px;
+                                font-weight: bold;
+                                padding: 6px 12px;
+                                min-width: 60px;
+                                min-height: 25px;
+                            }
+                        """)
+                        error_dialog.exec_()
         
         # Accept the close event
         event.accept()
@@ -4332,20 +4402,21 @@ class GoogleDriveSyncDialog(QDialog):
     def init_ui(self):
         """Initialize the dialog UI."""
         self.setWindowTitle("Google Drive Sync Settings")
-        self.setMinimumWidth(450)
+        self.setMinimumWidth(500)
 
         layout = QVBoxLayout(self)
 
         # Google Drive status section
         status_group = QGroupBox("Google Drive Status")
+        status_group.setStyleSheet("font-size: 16px; font-weight: bold;")
         status_layout = QVBoxLayout(status_group)
 
         if self.drive_sync.config.get('token'):
             status_label = QLabel("Connected to Google Drive")
-            status_label.setStyleSheet("color: green; font-weight: bold;")
+            status_label.setStyleSheet("color: green; font-weight: bold; font-size: 14px;")
         else:
             status_label = QLabel("Not connected to Google Drive")
-            status_label.setStyleSheet("color: gray;")
+            status_label.setStyleSheet("color: gray; font-size: 14px; font-weight: bold;")
 
         status_layout.addWidget(status_label)
 
@@ -4357,13 +4428,28 @@ class GoogleDriveSyncDialog(QDialog):
                 if isinstance(token_info, dict) and 'email' in token_info:
                     email = token_info['email']
                     account_label = QLabel(f"Connected Account: {email}")
+                    account_label.setStyleSheet("font-size: 13px;")
+                    status_layout.addWidget(account_label)
             except:
                 pass
         
         # Authentication button
         auth_button_text = "Re-Connect" if self.drive_sync.config.get('token') else "Connect to Google Drive"
         self.auth_button = QPushButton(auth_button_text)
-        self.auth_button.setStyleSheet("background-color: #4285F4; color: white;")
+        self.auth_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4285F4; 
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 15px;
+                border-radius: 6px;
+                min-height: 35px;
+            }
+            QPushButton:hover {
+                background-color: #3367D6;
+            }
+        """)
         self.auth_button.clicked.connect(self.authenticate)
         status_layout.addWidget(self.auth_button)
 
@@ -4374,19 +4460,21 @@ class GoogleDriveSyncDialog(QDialog):
             "in a folder named 'TreasureGoblin Backups'."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: gray; font-size: 9pt;")
+        info_label.setStyleSheet("color: gray; font-size: 12pt;")
         status_layout.addWidget(self.auth_button)
 
         layout.addWidget(status_group)
 
         # Enable sync checkbox
         self.enable_sync_checkbox = QCheckBox("Enable automatic Google Drive synchronization")
+        self.enable_sync_checkbox.setStyleSheet("font-size: 14px; font-weight: bold;")
         self.enable_sync_checkbox.setChecked(self.drive_sync.config.get('sync_enabled', False))
         self.enable_sync_checkbox.setEnabled(self.drive_sync.config.get('token') is not None)
         layout.addWidget(self.enable_sync_checkbox)
 
         # Sync frequency options
         sync_group = QGroupBox("Sync Frequency")
+        sync_group.setStyleSheet("font-size: 16px; font-weight: bold;")
         sync_layout = QFormLayout(sync_group)
 
         self.frequency_combo = QComboBox()
@@ -4395,6 +4483,19 @@ class GoogleDriveSyncDialog(QDialog):
         self.frequency_combo.addItem("Once Daily", "daily")
         self.frequency_combo.addItem("Once Weekly", "weekly")
         self.frequency_combo.addItem("Once Monthly", "monthly")
+        self.frequency_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 13px;
+                font-weight: bold;
+                padding: 8px 12px;
+                min-height: 25px;
+                border: 2px solid #ccc;
+                border-radius: 4px;
+            }
+            QComboBox:focus {
+                border: 2px solid #4285F4;
+            }
+        """)
         self.frequency_combo.setEnabled(self.drive_sync.config.get('token') is not None)
 
         # Set current value
@@ -4403,12 +4504,15 @@ class GoogleDriveSyncDialog(QDialog):
         if index >= 0:
             self.frequency_combo.setCurrentIndex(index)
 
-        sync_layout.addRow("Backup Frequency:", self.frequency_combo)
+        frequency_label = QLabel("Backup Frequency:")
+        frequency_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        sync_layout.addRow(frequency_label, self.frequency_combo)
 
         # Last sync information
         last_sync = self.drive_sync.config.get('last_sync')
         last_sync_text = "Never" if not last_sync else datetime.fromisoformat(last_sync).strftime("%m/%d/%Y %I:%M %p")
         self.last_sync_label = QLabel(f"Last Sync: {last_sync_text}")
+        self.last_sync_label.setStyleSheet("font-size: 13px; color: #666;")
         sync_layout.addRow("", self.last_sync_label)
 
         layout.addWidget(sync_group)
@@ -4417,15 +4521,58 @@ class GoogleDriveSyncDialog(QDialog):
         button_layout = QHBoxLayout()
 
         self.sync_now_button = QPushButton("Sync Now")
-        self.sync_now_button.setStyleSheet("background-color: #4285F4; color: white;")
+        self.sync_now_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4285F4; 
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 15px;
+                border-radius: 6px;
+                min-height: 35px;
+            }
+            QPushButton:hover {
+                background-color: #3367D6;
+            }
+            QPushButton:disabled {
+                background-color: #ccc;
+            }
+        """)
         self.sync_now_button.clicked.connect(self.sync_now)
         self.sync_now_button.setEnabled(self.drive_sync.config.get('token') is not None)
 
         self.save_button = QPushButton("Save Settings")
+        self.save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #34A853; 
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 15px;
+                border-radius: 6px;
+                min-height: 35px;
+            }
+            QPushButton:hover {
+                background-color: #2E8B47;
+            }
+        """)
         self.save_button.clicked.connect(self.save_settings)
 
         self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.setStyleSheet(f"background-color: {TreasureGoblinTheme.COLORS['danger_light']}; color: white;")
+        self.cancel_button.setStyleSheet("""
+        QPushButton {
+            background-color: #EA4335; 
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+            padding: 10px 15px;
+            border-radius: 6px;
+            min-height: 35px;
+        }
+        QPushButton:hover {
+            background-color: #D33B2C;
+        }
+    """)
         self.cancel_button.clicked.connect(self.reject)
 
         button_layout.addWidget(self.sync_now_button)
@@ -4439,6 +4586,20 @@ class GoogleDriveSyncDialog(QDialog):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                font-size: 12px;
+                font-weight: bold;
+                text-align: center;
+                border: 2px solid #ccc;
+                border-radius: 4px;
+                background-color: #f0f0f0;
+            }
+            QProgressBar::chunk {
+                background-color: #4285F4;
+                border-radius: 2px;
+            }
+        """)
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
 
