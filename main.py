@@ -2390,84 +2390,408 @@ class TreasureGoblinApp (QMainWindow):
 
     def add_new_category(self):
         """Add a new category."""
-        category_name, ok = QInputDialog.getText(
-            self, "Add Category", "Enter category name:"
-        )
-    
-        if ok and category_name:
-            try:
-                conn = self.get_db_connection()
-                cursor = conn.cursor()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Category")
+        dialog.setFixedSize(400, 200)
+        dialog.setModal(True)
+        
+        # Apply consistent styling
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {TreasureGoblinTheme.COLORS['surface']};
+                color: {TreasureGoblinTheme.COLORS['text_primary']};
+            }}
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 25, 30, 25)
+        
+        # Label
+        label = QLabel("Enter category name:")
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                font-size: 16px;
+                font-weight: bold;
+                margin-bottom: 10px;
+            }}
+        """)
+        layout.addWidget(label)
+        
+        # Input field
+        line_edit = QLineEdit()
+        line_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {TreasureGoblinTheme.COLORS['surface_light']};
+                border: 2px solid {TreasureGoblinTheme.COLORS['primary_dark']};
+                border-radius: 6px;
+                padding: 12px 15px;
+                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                font-size: 14px;
+                font-weight: bold;
+                min-height: 20px;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {TreasureGoblinTheme.COLORS['accent']};
+                background-color: {TreasureGoblinTheme.COLORS['surface']};
+            }}
+        """)
+        line_edit.setPlaceholderText("Category name...")
+        layout.addWidget(line_edit)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        # Cancel button
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {TreasureGoblinTheme.COLORS['surface_light']};
+                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 20px;
+                min-height: 35px;
+                border-radius: 6px;
+                border: 2px solid {TreasureGoblinTheme.COLORS['primary_dark']};
+            }}
+            QPushButton:hover {{
+                background-color: {TreasureGoblinTheme.COLORS['primary_dark']};
+            }}
+        """)
+        cancel_button.clicked.connect(dialog.reject)
+        
+        # OK button
+        ok_button = QPushButton("Add Category")
+        ok_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #CD5C5C;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 20px;
+                min-height: 35px;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: #DC2F02;
+            }}
+        """)
+        ok_button.clicked.connect(dialog.accept)
+        ok_button.setDefault(True)  # Make this the default button
+        
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(ok_button)
+        layout.addLayout(button_layout)
+        
+        # Set focus to the input field
+        line_edit.setFocus()
+        
+        # Show dialog and get result
+        if dialog.exec_() == QDialog.Accepted:
+            category_name = line_edit.text().strip()
             
-                # Check if category already exists
-                cursor.execute(
-                    "SELECT id FROM categories WHERE name = ? AND type = ?",
-                    (category_name, self.current_category_type)
-                )
-            
-                if cursor.fetchone():
-                    QMessageBox.warning(
-                        self, "Duplicate Category", 
-                        f"A {self.current_category_type} category named '{category_name}' already exists."
-                )
-                else:
-                    # Add new category
+            if category_name:
+                try:
+                    conn = self.get_db_connection()
+                    cursor = conn.cursor()
+                
+                    # Check if category already exists
                     cursor.execute(
-                        "INSERT INTO categories (name, type) VALUES (?, ?)",
+                        "SELECT id FROM categories WHERE name = ? AND type = ?",
                         (category_name, self.current_category_type)
                     )
-                    conn.commit()
-                    QMessageBox.information(
-                        self, "Success", f"Category '{category_name}' added successfully!"
-                    )
-                    # Reload categories
-                    self.load_categories()
-            
-                conn.close()
-            
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to add category: {str(e)}")
+                
+                    if cursor.fetchone():
+                        QMessageBox.warning(
+                            self, "Duplicate Category", 
+                            f"A {self.current_category_type} category named '{category_name}' already exists."
+                        )
+                    else:
+                        # Add new category
+                        cursor.execute(
+                            "INSERT INTO categories (name, type) VALUES (?, ?)",
+                            (category_name, self.current_category_type)
+                        )
+                        conn.commit()
+                        # Create styled success message
+                        success_msg = QMessageBox(self)
+                        success_msg.setIcon(QMessageBox.Information)
+                        success_msg.setWindowTitle("Success")
+                        success_msg.setText(f"Category '{category_name}' added successfully!")
+                        success_msg.setStyleSheet(f"""
+                            QMessageBox {{
+                                background-color: {TreasureGoblinTheme.COLORS['surface']};
+                                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                                font-size: 16px;
+                            }}
+                            QMessageBox QLabel {{
+                                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                                font-size: 16px;
+                                font-weight: bold;
+                                margin: 10px;
+                            }}
+                            QMessageBox QPushButton {{
+                                background-color: #CD5C5C;
+                                color: white;
+                                font-size: 14px;
+                                font-weight: bold;
+                                padding: 8px 16px;
+                                margin: 4px;
+                                min-width: 70px;
+                                min-height: 30px;
+                                border-radius: 4px;
+                            }}
+                            QMessageBox QPushButton:hover {{
+                                background-color: #DC2F02;
+                            }}
+                        """)
+                        success_msg.exec_()
+                        # Reload categories
+                        self.load_categories()
+                
+                    conn.close()
+                
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to add category: {str(e)}")
+            else:
+                QMessageBox.warning(self, "Invalid Input", "Please enter a category name.")
 
     def edit_category(self, category_id, current_name):
         """Edit an existing category."""
-        new_name, ok = QInputDialog.getText(
-            self, "Edit Category", "Enter new category name:",
-            text=current_name
-        )
+        # Create a custom dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Category")
+        dialog.setFixedSize(400, 200)
+        dialog.setModal(True)
+        
+        # Apply consistent styling
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {TreasureGoblinTheme.COLORS['surface']};
+                color: {TreasureGoblinTheme.COLORS['text_primary']};
+            }}
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 25, 30, 25)
+        
+        # Label with larger font
+        label = QLabel("Enter new category name:")
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                font-size: 16px;
+                font-weight: bold;
+                margin-bottom: 10px;
+            }}
+        """)
+        layout.addWidget(label)
+        
+        # Input field with larger font and current name pre-filled
+        line_edit = QLineEdit()
+        line_edit.setText(current_name)  # Pre-fill with current name
+        line_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {TreasureGoblinTheme.COLORS['surface_light']};
+                border: 2px solid {TreasureGoblinTheme.COLORS['primary_dark']};
+                border-radius: 6px;
+                padding: 12px 15px;
+                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                font-size: 14px;
+                font-weight: bold;
+                min-height: 20px;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {TreasureGoblinTheme.COLORS['accent']};
+                background-color: {TreasureGoblinTheme.COLORS['surface']};
+            }}
+        """)
+        layout.addWidget(line_edit)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        # Cancel button
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {TreasureGoblinTheme.COLORS['surface_light']};
+                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 20px;
+                min-height: 35px;
+                border-radius: 6px;
+                border: 2px solid {TreasureGoblinTheme.COLORS['primary_dark']};
+            }}
+            QPushButton:hover {{
+                background-color: {TreasureGoblinTheme.COLORS['primary_dark']};
+            }}
+        """)
+        cancel_button.clicked.connect(dialog.reject)
+        
+        # Update button
+        update_button = QPushButton("Update Category")
+        update_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #CD5C5C;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 20px;
+                min-height: 35px;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: #DC2F02;
+            }}
+        """)
+        update_button.clicked.connect(dialog.accept)
+        update_button.setDefault(True)  # Make this the default button
+        
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(update_button)
+        layout.addLayout(button_layout)
+        
+        # Select all text for easy editing
+        line_edit.selectAll()
+        line_edit.setFocus()
+        
+        # Show dialog and get result
+        if dialog.exec_() == QDialog.Accepted:
+            new_name = line_edit.text().strip()
+            
+            if new_name and new_name != current_name:
+                try:
+                    conn = self.get_db_connection()
+                    cursor = conn.cursor()
 
-        if ok and new_name and new_name != current_name:
-            try:
-                conn = self.get_db_connection()
-                cursor = conn.cursor()
-
-                # Check if the new name already exists
-                cursor.execute(
-                    "SELECT id FROM categories WHERE name =? AND type = ? AND id != ?",
-                        (new_name, self.current_category_type, category_id)
-                )
-
-                if cursor.fetchone():
-                    QMessageBox.warning(
-                        self, "Duplicate Category",
-                        f"A {self.current_category_type} category named '{new_name}' already exists"
-                    )
-                else:
-                    # Update category name
+                    # Check if the new name already exists
                     cursor.execute(
-                        "UPDATE categories SET name = ? WHERE id = ?",
-                            (new_name, category_id)
+                        "SELECT id FROM categories WHERE name =? AND type = ? AND id != ?",
+                            (new_name, self.current_category_type, category_id)
                     )
-                    conn.commit()
-                    QMessageBox.information(
-                        self, "Success", f"Category renamed to '{new_name}' successfully!"
-                    )
-                    # Reload categories
-                    self.load_categories()
 
-                conn.close()
+                    if cursor.fetchone():
+                        # Create styled warning message
+                        warning_msg = QMessageBox(self)
+                        warning_msg.setIcon(QMessageBox.Warning)
+                        warning_msg.setWindowTitle("Duplicate Category")
+                        warning_msg.setText(f"A {self.current_category_type} category named '{new_name}' already exists")
+                        warning_msg.setStyleSheet(f"""
+                            QMessageBox {{
+                                background-color: {TreasureGoblinTheme.COLORS['surface']};
+                                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                                font-size: 16px;
+                            }}
+                            QMessageBox QLabel {{
+                                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                                font-size: 16px;
+                                font-weight: bold;
+                                margin: 10px;
+                            }}
+                            QMessageBox QPushButton {{
+                                background-color: #CD5C5C;
+                                color: white;
+                                font-size: 14px;
+                                font-weight: bold;
+                                padding: 8px 16px;
+                                margin: 4px;
+                                min-width: 70px;
+                                min-height: 30px;
+                                border-radius: 4px;
+                            }}
+                            QMessageBox QPushButton:hover {{
+                                background-color: #DC2F02;
+                            }}
+                        """)
+                        warning_msg.exec_()
+                    else:
+                        # Update category name
+                        cursor.execute(
+                            "UPDATE categories SET name = ? WHERE id = ?",
+                                (new_name, category_id)
+                        )
+                        conn.commit()
+                        
+                        # Create styled success message
+                        success_msg = QMessageBox(self)
+                        success_msg.setIcon(QMessageBox.Information)
+                        success_msg.setWindowTitle("Success")
+                        success_msg.setText(f"Category renamed to '{new_name}' successfully!")
+                        success_msg.setStyleSheet(f"""
+                            QMessageBox {{
+                                background-color: {TreasureGoblinTheme.COLORS['surface']};
+                                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                                font-size: 16px;
+                            }}
+                            QMessageBox QLabel {{
+                                color: {TreasureGoblinTheme.COLORS['text_primary']};
+                                font-size: 16px;
+                                font-weight: bold;
+                                margin: 10px;
+                            }}
+                            QMessageBox QPushButton {{
+                                background-color: #CD5C5C;
+                                color: white;
+                                font-size: 14px;
+                                font-weight: bold;
+                                padding: 8px 16px;
+                                margin: 4px;
+                                min-width: 70px;
+                                min-height: 30px;
+                                border-radius: 4px;
+                            }}
+                            QMessageBox QPushButton:hover {{
+                                background-color: #DC2F02;
+                            }}
+                        """)
+                        success_msg.exec_()
+                        
+                        # Reload categories
+                        self.load_categories()
 
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to update category: {str(e)}")
+                    conn.close()
+
+                except Exception as e:
+                    # Create styled error message
+                    error_msg = QMessageBox(self)
+                    error_msg.setIcon(QMessageBox.Critical)
+                    error_msg.setWindowTitle("Error")
+                    error_msg.setText(f"Failed to update category: {str(e)}")
+                    error_msg.setStyleSheet(f"""
+                        QMessageBox {{
+                            background-color: {TreasureGoblinTheme.COLORS['surface']};
+                            color: {TreasureGoblinTheme.COLORS['text_primary']};
+                            font-size: 16px;
+                        }}
+                        QMessageBox QLabel {{
+                            color: {TreasureGoblinTheme.COLORS['text_primary']};
+                            font-size: 16px;
+                            font-weight: bold;
+                            margin: 10px;
+                        }}
+                        QMessageBox QPushButton {{
+                            background-color: #CD5C5C;
+                            color: white;
+                            font-size: 14px;
+                            font-weight: bold;
+                            padding: 8px 16px;
+                            margin: 4px;
+                            min-width: 70px;
+                            min-height: 30px;
+                            border-radius: 4px;
+                        }}
+                        QMessageBox QPushButton:hover {{
+                            background-color: #DC2F02;
+                        }}
+                    """)
+                    error_msg.exec_()
 
     def delete_category(self, category_id, category_name):
         """Delete a category after confirmation and reassign transactions to {NO_CATEGORY}."""
@@ -2482,7 +2806,39 @@ class TreasureGoblinApp (QMainWindow):
             )
             is_system_result = cursor.fetchone()
             if is_system_result and is_system_result[0]:
-                QMessageBox.warning(self, "Cannot Delete", "System categories cannot be deleted.")
+                # Create styled warning message
+                warning_msg = QMessageBox(self)
+                warning_msg.setIcon(QMessageBox.Warning)
+                warning_msg.setWindowTitle("Cannot Delete")
+                warning_msg.setText("System categories cannot be deleted.")
+                warning_msg.setStyleSheet(f"""
+                    QMessageBox {{
+                        background-color: {TreasureGoblinTheme.COLORS['surface']};
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                    }}
+                    QMessageBox QLabel {{
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                        font-weight: bold;
+                        margin: 10px;
+                    }}
+                    QMessageBox QPushButton {{
+                        background-color: #CD5C5C;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                        padding: 8px 16px;
+                        margin: 4px;
+                        min-width: 70px;
+                        min-height: 30px;
+                        border-radius: 4px;
+                    }}
+                    QMessageBox QPushButton:hover {{
+                        background-color: #DC2F02;
+                    }}
+                """)
+                warning_msg.exec_()
                 conn.close()
                 return
 
@@ -2493,7 +2849,39 @@ class TreasureGoblinApp (QMainWindow):
             )
             category_type_result = cursor.fetchone()
             if not category_type_result:
-                QMessageBox.warning(self, "Error", "Category not found.")
+                # Create styled warning message
+                warning_msg = QMessageBox(self)
+                warning_msg.setIcon(QMessageBox.Warning)
+                warning_msg.setWindowTitle("Error")
+                warning_msg.setText("Category not found.")
+                warning_msg.setStyleSheet(f"""
+                    QMessageBox {{
+                        background-color: {TreasureGoblinTheme.COLORS['surface']};
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                    }}
+                    QMessageBox QLabel {{
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                        font-weight: bold;
+                        margin: 10px;
+                    }}
+                    QMessageBox QPushButton {{
+                        background-color: #CD5C5C;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                        padding: 8px 16px;
+                        margin: 4px;
+                        min-width: 70px;
+                        min-height: 30px;
+                        border-radius: 4px;
+                    }}
+                    QMessageBox QPushButton:hover {{
+                        background-color: #DC2F02;
+                    }}
+                """)
+                warning_msg.exec_()
                 conn.close()
                 return
             
@@ -2508,25 +2896,85 @@ class TreasureGoblinApp (QMainWindow):
             usage_count = cursor.fetchone()[0]
 
             if usage_count > 0:
-                reply = QMessageBox.question(
-                    self, "Category In Use",
-                    f"The category '{category_name}' is used in {usage_count} transactions.\n\n"
+                # Create styled confirmation dialog for categories in use
+                confirm_msg = QMessageBox(self)
+                confirm_msg.setIcon(QMessageBox.Question)
+                confirm_msg.setWindowTitle("Category In Use")
+                confirm_msg.setText(f"The category '{category_name}' is used in {usage_count} transactions.")
+                confirm_msg.setInformativeText(
                     "Deleting it will move those transactions to {NO_CATEGORY} where you can "
-                    "reassign them to other categories if needed.\n\nProceed?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                    "reassign them to other categories if needed.\n\nProceed?"
                 )
+                confirm_msg.setStyleSheet(f"""
+                    QMessageBox {{
+                        background-color: {TreasureGoblinTheme.COLORS['surface']};
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                    }}
+                    QMessageBox QLabel {{
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                        font-weight: bold;
+                        margin: 10px;
+                    }}
+                    QMessageBox QPushButton {{
+                        background-color: #CD5C5C;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                        padding: 8px 16px;
+                        margin: 4px;
+                        min-width: 70px;
+                        min-height: 30px;
+                        border-radius: 4px;
+                    }}
+                    QMessageBox QPushButton:hover {{
+                        background-color: #DC2F02;
+                    }}
+                """)
+                confirm_msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                confirm_msg.setDefaultButton(QMessageBox.No)
 
-                if reply != QMessageBox.Yes:
+                if confirm_msg.exec_() != QMessageBox.Yes:
                     conn.close()
                     return
             else:
-                reply = QMessageBox.question(
-                    self, "Confirm Deletion",
-                    f"Are you sure you want to delete the category '{category_name}'?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-                )
+                # Create styled confirmation dialog for unused categories
+                confirm_msg = QMessageBox(self)
+                confirm_msg.setIcon(QMessageBox.Question)
+                confirm_msg.setWindowTitle("Confirm Deletion")
+                confirm_msg.setText(f"Are you sure you want to delete the category '{category_name}'?")
+                confirm_msg.setStyleSheet(f"""
+                    QMessageBox {{
+                        background-color: {TreasureGoblinTheme.COLORS['surface']};
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                    }}
+                    QMessageBox QLabel {{
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                        font-weight: bold;
+                        margin: 10px;
+                    }}
+                    QMessageBox QPushButton {{
+                        background-color: #CD5C5C;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                        padding: 8px 16px;
+                        margin: 4px;
+                        min-width: 70px;
+                        min-height: 30px;
+                        border-radius: 4px;
+                    }}
+                    QMessageBox QPushButton:hover {{
+                        background-color: #DC2F02;
+                    }}
+                """)
+                confirm_msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                confirm_msg.setDefaultButton(QMessageBox.No)
 
-                if reply != QMessageBox.Yes:
+                if confirm_msg.exec_() != QMessageBox.Yes:
                     conn.close()
                     return
 
@@ -2537,7 +2985,39 @@ class TreasureGoblinApp (QMainWindow):
             )
             no_category_result = cursor.fetchone()
             if not no_category_result:
-                QMessageBox.critical(self, "Error", "System {NO_CATEGORY} not found. Database may be corrupted.")
+                # Create styled error message
+                error_msg = QMessageBox(self)
+                error_msg.setIcon(QMessageBox.Critical)
+                error_msg.setWindowTitle("Error")
+                error_msg.setText("System {NO_CATEGORY} not found. Database may be corrupted.")
+                error_msg.setStyleSheet(f"""
+                    QMessageBox {{
+                        background-color: {TreasureGoblinTheme.COLORS['surface']};
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                    }}
+                    QMessageBox QLabel {{
+                        color: {TreasureGoblinTheme.COLORS['text_primary']};
+                        font-size: 16px;
+                        font-weight: bold;
+                        margin: 10px;
+                    }}
+                    QMessageBox QPushButton {{
+                        background-color: #CD5C5C;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                        padding: 8px 16px;
+                        margin: 4px;
+                        min-width: 70px;
+                        min-height: 30px;
+                        border-radius: 4px;
+                    }}
+                    QMessageBox QPushButton:hover {{
+                        background-color: #DC2F02;
+                    }}
+                """)
+                error_msg.exec_()
                 conn.close()
                 return
             
@@ -2560,16 +3040,77 @@ class TreasureGoblinApp (QMainWindow):
                 cursor.execute("COMMIT")
 
                 if usage_count > 0:
-                    QMessageBox.information(
-                        self, "Success", 
-                        f"Category '{category_name}' deleted successfully!\n\n"
+                    # Create styled success message for categories with transactions
+                    success_msg = QMessageBox(self)
+                    success_msg.setIcon(QMessageBox.Information)
+                    success_msg.setWindowTitle("Success")
+                    success_msg.setText(f"Category '{category_name}' deleted successfully!")
+                    success_msg.setInformativeText(
                         f"{usage_count} transactions have been moved to {{NO_CATEGORY}}. "
                         "You can find and reassign them in the Transactions tab."
                     )
+                    success_msg.setStyleSheet(f"""
+                        QMessageBox {{
+                            background-color: {TreasureGoblinTheme.COLORS['surface']};
+                            color: {TreasureGoblinTheme.COLORS['text_primary']};
+                            font-size: 16px;
+                        }}
+                        QMessageBox QLabel {{
+                            color: {TreasureGoblinTheme.COLORS['text_primary']};
+                            font-size: 16px;
+                            font-weight: bold;
+                            margin: 10px;
+                        }}
+                        QMessageBox QPushButton {{
+                            background-color: #CD5C5C;
+                            color: white;
+                            font-size: 14px;
+                            font-weight: bold;
+                            padding: 8px 16px;
+                            margin: 4px;
+                            min-width: 70px;
+                            min-height: 30px;
+                            border-radius: 4px;
+                        }}
+                        QMessageBox QPushButton:hover {{
+                            background-color: #DC2F02;
+                        }}
+                    """)
+                    success_msg.exec_()
                 else:
-                    QMessageBox.information(
-                        self, "Success", f"Category '{category_name}' deleted successfully!"
-                    )
+                    # Create styled success message for unused categories
+                    success_msg = QMessageBox(self)
+                    success_msg.setIcon(QMessageBox.Information)
+                    success_msg.setWindowTitle("Success")
+                    success_msg.setText(f"Category '{category_name}' deleted successfully!")
+                    success_msg.setStyleSheet(f"""
+                        QMessageBox {{
+                            background-color: {TreasureGoblinTheme.COLORS['surface']};
+                            color: {TreasureGoblinTheme.COLORS['text_primary']};
+                            font-size: 16px;
+                        }}
+                        QMessageBox QLabel {{
+                            color: {TreasureGoblinTheme.COLORS['text_primary']};
+                            font-size: 16px;
+                            font-weight: bold;
+                            margin: 10px;
+                        }}
+                        QMessageBox QPushButton {{
+                            background-color: #CD5C5C;
+                            color: white;
+                            font-size: 14px;
+                            font-weight: bold;
+                            padding: 8px 16px;
+                            margin: 4px;
+                            min-width: 70px;
+                            min-height: 30px;
+                            border-radius: 4px;
+                        }}
+                        QMessageBox QPushButton:hover {{
+                            background-color: #DC2F02;
+                        }}
+                    """)
+                    success_msg.exec_()
 
                 # Reload categories
                 self.load_categories()
@@ -2581,7 +3122,39 @@ class TreasureGoblinApp (QMainWindow):
             conn.close()
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to delete category: {str(e)}")
+            # Create styled error message
+            error_msg = QMessageBox(self)
+            error_msg.setIcon(QMessageBox.Critical)
+            error_msg.setWindowTitle("Error")
+            error_msg.setText(f"Failed to delete category: {str(e)}")
+            error_msg.setStyleSheet(f"""
+                QMessageBox {{
+                    background-color: {TreasureGoblinTheme.COLORS['surface']};
+                    color: {TreasureGoblinTheme.COLORS['text_primary']};
+                    font-size: 16px;
+                }}
+                QMessageBox QLabel {{
+                    color: {TreasureGoblinTheme.COLORS['text_primary']};
+                    font-size: 16px;
+                    font-weight: bold;
+                    margin: 10px;
+                }}
+                QMessageBox QPushButton {{
+                    background-color: #CD5C5C;
+                    color: white;
+                    font-size: 14px;
+                    font-weight: bold;
+                    padding: 8px 16px;
+                    margin: 4px;
+                    min-width: 70px;
+                    min-height: 30px;
+                    border-radius: 4px;
+                }}
+                QMessageBox QPushButton:hover {{
+                    background-color: #DC2F02;
+                }}
+            """)
+            error_msg.exec_()
 
     def get_db_connection(self):
         """Get a connection to the SQLite database."""
@@ -3868,11 +4441,9 @@ class TreasureButton(QPushButton):
             self.setObjectName("dangerButton")
 
     def enterEvent(self, event):
-        # TODO ADD ANIMATION HERE
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        # TODO ADD ANIMATION HERE
         super().leaveEvent(event)
 
 class MoneyDisplay(QWidget):
