@@ -4576,6 +4576,10 @@ class GoogleDriveSync(QObject):
     # Scopes required for Google Drive API
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
+    # OAuth credentials (fallback if client_secret.json not found)
+    CLIENT_ID = ""  # Add your client ID here
+    CLIENT_SECRET = ""  # Add your client secret here
+
     def __init__(self, treasure_goblin):
         super().__init__()
         self.treasure_goblin = treasure_goblin
@@ -4640,28 +4644,32 @@ class GoogleDriveSync(QObject):
                 try:
                     # Define the path to the client secret file
                     script_dir = os.path.dirname(os.path.abspath(__file__))
-                    client_config_file = os.path.join(
-                        script_dir, 
-                        "client_secret_201372032136-ev7nhopm297avo3lotgufftvlb6kgao2.apps.googleusercontent.com.json"
-                    )
-                    
+
+                    # Try simple name in script directory first
+                    client_config_file = os.path.join(script_dir, "client_secret.json")
+
                     # Check if the file exists
                     if not os.path.exists(client_config_file):
-                        # Try in app_dir as fallback
-                        client_config_file = self.app_dir / "client_secret_201372032136-ev7nhopm297avo3lotgufftvlb6kgao2.apps.googleusercontent.com.json"
-                        
-                        # If still not found, try with a simpler name
+                        # Try the long filename
+                        client_config_file = os.path.join(
+                            script_dir,
+                            "client_secret_201372032136-ev7nhopm297avo3lotgufftvlb6kgao2.apps.googleusercontent.com.json"
+                        )
+
                         if not os.path.exists(client_config_file):
+                            # Try in app_dir as fallback
                             client_config_file = self.app_dir / "client_secret.json"
-                            
-                            # If even simpler name not found, use embedded credentials
+
+                            # If still not found, use embedded credentials
                             if not os.path.exists(client_config_file):
                                 raise FileNotFoundError("Client secret file not found")
-                    
+
+                    print(f"Using client secret file: {client_config_file}")
+
                     # Use the file for authentication
                     flow = InstalledAppFlow.from_client_secrets_file(
-                        client_config_file, self.SCOPES)
-                    creds = flow.run_local_server(port=0)
+                        str(client_config_file), self.SCOPES)
+                    creds = flow.run_local_server(port=8080)
                     
                 except FileNotFoundError:
                     # Fallback to embedded credentials
@@ -4679,7 +4687,7 @@ class GoogleDriveSync(QObject):
                     
                     flow = InstalledAppFlow.from_client_config(
                         client_config, self.SCOPES)
-                    creds = flow.run_local_server(port=0)
+                    creds = flow.run_local_server(port=8080)
                 
             # Save the updated token
             self.config['token'] = json.loads(creds.to_json())
