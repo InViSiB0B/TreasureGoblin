@@ -6,7 +6,8 @@ treasuregoblin.db
 *.db-journal
 
 # Google Drive API credentials
-client_secret_*.json
+client_secret*.json
+token.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
