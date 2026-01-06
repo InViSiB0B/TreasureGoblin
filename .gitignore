@@ -1,6 +1,9 @@
 # VS Code
 .vscode/
 
+# Claude Code
+.claude/
+
 # Database files
 treasuregoblin.db
 *.db-journal
