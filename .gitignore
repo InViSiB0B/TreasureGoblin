@@ -1,12 +1,16 @@
 # VS Code
 .vscode/
 
+# Claude Code
+.claude/
+
 # Database files
 treasuregoblin.db
 *.db-journal
 
 # Google Drive API credentials
-client_secret*.json
+client_secret.json
+client_secret_*.json
 token.json
 
 # Byte-compiled / optimized / DLL files
